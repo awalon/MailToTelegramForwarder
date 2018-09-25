@@ -36,11 +36,13 @@ cp imap2telegram.py /usr/local/bin/
 cp imap2telegram.conf /etc/imap2telegram/
 cp imap2telegram.service /etc/systemd/system/
 systemctl daemon-reload
+```
 
 You should edit /etc/imap2telegram/ima2telegram.conf now. 
 Again, using a dedicated IMAP mailbox is strongly recommended, because
 every new mail will get a delete flag.
 
+```
 You may enable and start the daemon, now:
 systemctl enable imap2telegram
 systemctl start imap2telegram
