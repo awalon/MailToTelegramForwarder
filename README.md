@@ -13,7 +13,7 @@ To run "imap2telegram.py" you have to make sure the follwing Python libraries ar
 - argparse
 - telegram-send
 - imapclient
-
+- email
 ```
 
 Make sure that 'telegram-send' is configured with a valid token.
