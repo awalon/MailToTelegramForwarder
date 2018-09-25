@@ -29,16 +29,16 @@ unzip master.zip
 useradd imap2telegram
 mkdir /etc/imap2telegram
 cd IMAP2Telegram-master
-chown telegram:telegram imap2telegram.py
+chown imap2telegram:imap2telegram imap2telegram.py
 chmod +x imap2telegram.py
-chown telegram:telegram imap2telegram.conf
+chown imap2telegram:imap2telegram imap2telegram.conf
 cp imap2telegram.py /usr/local/bin/
 cp imap2telegram.conf /etc/imap2telegram/
 cp imap2telegram.service /etc/systemd/system/
 systemctl daemon-reload
 ```
 
-You should edit /etc/imap2telegram/ima2telegram.conf now. 
+You should edit /etc/imap2telegram/imap2telegram.conf now. 
 Again, using a dedicated IMAP mailbox is strongly recommended, because
 every new mail will get a delete flag.
 
