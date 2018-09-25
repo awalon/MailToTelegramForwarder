@@ -1,8 +1,11 @@
 # IMAP2Telegram
 
-IMAP2Telegram is a Python based daemon that
-will fetch mails from a remote IMAP server
-and forward the subjects via Telegram API.
+IMAP2Telegram is a Python based daemon that will
+fetch mails from a remote IMAP server and forward
+the subjects via Telegram API. There's no need 
+for a dedicated mail server and piping Alias to a
+script; you can use any IMAP capable provider like
+gmail, outlook, self-hosted, etc to use this feature.
 
 ### Prerequisites
 
