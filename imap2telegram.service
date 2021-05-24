@@ -1,6 +1,0 @@
-[Unit]
-Description=IMAP2Telegram Service
-
-[Service]
-ExecStart=/usr/local/bin/imap2telegram.py -c /etc/imap2telegram/imap2telegram.conf
-User=imap2telegram
