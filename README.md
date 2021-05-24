@@ -31,7 +31,10 @@ To run "mailToTelegramForwarder.py" you have to make sure Python
 - imaplib2
 ```
 
-For Debian 10.x (Buster) these packages have to be installed:
+For Debian 11.x (Bullseye) these packages have to be installed:
+
+**Hint**: python3-python-telegram-bot could be available with Bullseye 
+(Testing, 25th of May 2012)
 ```
 sudo apt install python3-python-telegram-bot python3-imaplib2
 ```
@@ -62,7 +65,7 @@ sudo chmod +x mailToTelegramForwarder.py
 # create application folder and link executable to default path
 sudo mkdir /opt/mailToTelegramForwarder
 sudo cp mailToTelegramForwarder.py *.md /opt/mailToTelegramForwarder/
-sudo ln -sT /opt/mailToTelegramForwarder/mailToTelegramForwarder /usr/local/bin/mailToTelegramForwarder
+sudo ln -sT /opt/mailToTelegramForwarder/mailToTelegramForwarder.py /usr/local/bin/mailToTelegramForwarder
 
 # create folder for configuration files
 sudo mkdir /etc/mail-to-telegram-forwarder
@@ -159,11 +162,11 @@ Expectation: Forwarded content will be smaller than this value.
 `bot_token`: When the bot is registered via [@botfather](https://telegram.me/botfather)
 it will get a unique and long token. Enter this token here (ex.: `123456789:djc28e398e223lkje`).
 
-`forward_to_user_id`: This script posts messages only to predefined chats, which can 
+`forward_to_chat_id`: This script posts messages only to predefined chats, which can 
 be a group or individual chat. The easiest way to get the ID of a chat is to add the
 [@myidbot](https://telegram.me/myidbot) bot to the chat. After ID bot was started with 
-`/start` own ID can be requested by `/getid`, if ID bot was added to a group chat 
-`/getgroupid` provides ID of group chat.
+`/start` own ID can be requested by `/getid` (ID >  0), if ID bot was added to a group 
+chat `/getgroupid` (ID < 0) provides ID of group chat.
 
 Hint: Bot should be added to the chat to be able to post.
 ```
@@ -209,7 +212,7 @@ See [configuration template](conf/mailToTelegramForwarder.conf)
 
 ### Installing as systemd service
 ```
-cp mail-to-telegram-forwarder.service /etc/systemd/system/
+cp mail-to-telegram-forwarder@.service /etc/systemd/system/
 systemctl daemon-reload
 ```
 
@@ -239,5 +242,5 @@ systemctl start mail-to-telegram-forwarder@mailToTelegramForwarder
 
 This project is licensed under the *GPLv3 License* - see the 
 [LICENSE.md](LICENSE.md) file for details -, same parts 
-(from IMAPBot) are licensed under the *The MIT License (MIT)* 
-- see the [LICENSE-MIT.md](LICENSE-MIT.md) file for details -.
+(from IMAPBot) are licensed under the *The MIT License (MIT)* - 
+see the [LICENSE-MIT.md](LICENSE-MIT.md) file for details -.

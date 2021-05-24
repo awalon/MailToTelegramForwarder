@@ -37,7 +37,7 @@ class Tool:
         pass
 
     @staticmethod
-    def bin2str(value, **kwargs):
+    def binary_to_string(value, **kwargs):
         encoding = kwargs.get('encoding')
         if not encoding:
             encoding = 'utf-8'
@@ -67,7 +67,7 @@ class Config:
     imap_max_length = 2000
 
     tg_bot_token = None
-    tg_forward_to_user_id = None
+    tg_forward_to_chat_id = None
     tg_prefer_html = True
     tg_markdown_version = 2
     tg_forward_mail_content = True
@@ -99,8 +99,8 @@ class Config:
             self.imap_max_length = self.get_config('Mail', 'max_length', self.imap_max_length, int)
 
             self.tg_bot_token = self.get_config('Telegram', 'bot_token', self.tg_bot_token)
-            self.tg_forward_to_user_id = self.get_config('Telegram', 'forward_to_user_id',
-                                                         self.tg_forward_to_user_id, int)
+            self.tg_forward_to_chat_id = self.get_config('Telegram', 'forward_to_chat_id',
+                                                         self.tg_forward_to_chat_id, int)
             self.tg_forward_mail_content = self.get_config('Telegram', 'forward_mail_content',
                                                            self.tg_forward_mail_content, bool)
             self.tg_prefer_html = self.get_config('Telegram', 'prefer_html', self.tg_prefer_html, bool)
@@ -220,7 +220,7 @@ class TelegramBot:
         """
         try:
             bot = telegram.Bot(self.config.tg_bot_token)
-            tg_chat = bot.get_chat(self.config.tg_forward_to_user_id)
+            tg_chat = bot.get_chat(self.config.tg_forward_to_chat_id)
 
             for mail in mails:
                 if self.config.tg_markdown_version == 2:
@@ -234,14 +234,14 @@ class TelegramBot:
                     # send mail content (summary)
                     message = mail.summary
 
-                    tg_message = bot.send_message(chat_id=self.config.tg_forward_to_user_id,
+                    tg_message = bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
                                                   parse_mode=parser,
                                                   text=message,
                                                   disable_web_page_preview=False)
 
                     logging.info("Mail summary for '%s' was sent with ID '%i' to '%s' (ID: '%i')"
                                  % (mail.mail_subject, tg_message.message_id,
-                                    tg_chat.full_name, self.config.tg_forward_to_user_id))
+                                    tg_chat.full_name, self.config.tg_forward_to_chat_id))
 
                 if self.config.tg_forward_attachment and len(mail.attachments) > 0:
                     for attachment in mail.attachments:
@@ -254,7 +254,7 @@ class TelegramBot:
                                 text=attachment.name, version=self.config.tg_markdown_version)
                             caption = '*' + subject + '*:\n' + file_name
 
-                        tg_message = bot.send_document(chat_id=self.config.tg_forward_to_user_id,
+                        tg_message = bot.send_document(chat_id=self.config.tg_forward_to_chat_id,
                                                        parse_mode=parser,
                                                        caption=caption,
                                                        document=attachment.file,
@@ -263,7 +263,7 @@ class TelegramBot:
 
                         logging.info("Attachment '%s' was sent with ID '%i' to '%s' (ID: '%i')"
                                      % (attachment.name, tg_message.message_id,
-                                        tg_chat.full_name, self.config.tg_forward_to_user_id))
+                                        tg_chat.full_name, self.config.tg_forward_to_chat_id))
 
         except telegram.TelegramError as tg_error:
             logging.critical("Failed to send Telegram message: " + tg_error.message)
@@ -308,6 +308,8 @@ class Mail:
     config = None
     last_uid = None
 
+    previous_error = None
+
     class MailError(Exception):
         def __init__(self, message, errors=None):
             super().__init__(message)
@@ -334,7 +336,7 @@ class Mail:
             raise self.MailError(msg, gai_error)
 
         except imaplib.IMAP4_SSL.error as imap_ssl_error:
-            error_msgs = [Tool.bin2str(arg) for arg in imap_ssl_error.args]
+            error_msgs = [Tool.binary_to_string(arg) for arg in imap_ssl_error.args]
             msg = "Login to '%s:%i' failed: %s" % (config.imap_server,
                                                    config.imap_port,
                                                    ', '.join(error_msgs))
@@ -419,8 +421,8 @@ class Mail:
         rv, data = self.mailbox.uid('search', '', 'UID *')
         if rv != 'OK':
             logging.info("No messages found!")
-            return
-        return bytes(data[0]).decode()
+            return ''
+        return Tool.binary_to_string(data[0])
 
     def parse_mail(self, uid, mail):
         """
@@ -492,10 +494,10 @@ class Mail:
             subject = ''
             for subject_part in email.header.decode_header(msg['Subject']):
                 part, encoding = subject_part
-                subject += Tool.bin2str(part, encoding=encoding)
+                subject += Tool.binary_to_string(part, encoding=encoding)
 
             # build summary
-            mail_from = Tool.bin2str(msg['From'])
+            mail_from = Tool.binary_to_string(msg['From'])
             if self.config.tg_forward_mail_content:
                 summary_line = "\n=============================\n"
             else:
@@ -537,7 +539,7 @@ class Mail:
         """
         Search mail on remote IMAP server and return list of parsed mails.
         """
-        if self.last_uid is None:
+        if self.last_uid is None or self.last_uid == '':
             self.last_uid = self.get_last_uid()
 
         # build IMAP search string
@@ -547,9 +549,21 @@ class Mail:
         else:
             search_string = re.sub(r'\${lastUID}', str(self.last_uid), search_string)
 
-        rv, data = self.mailbox.uid('search', '', search_string)
-        if rv != 'OK':
-            logging.info("No messages found!")
+        if re.match(r'.*\bUID\b\s*:.*', search_string) and self.last_uid == '':
+            # empty mailbox
+            return
+
+        try:
+            rv, data = self.mailbox.uid('search', '', search_string)
+            if rv != 'OK':
+                logging.info("No messages found!")
+                return
+        except imaplib.IMAP4_SSL.error as search_error:
+            error_msgs = [Tool.binary_to_string(arg) for arg in search_error.args]
+            msg = "Search with '%s' returned: %s" % (search_string, ', '.join(error_msgs))
+            if msg != self.previous_error:
+                logging.error(msg)
+            self.previous_error = msg
             return
 
         mails = []
@@ -563,7 +577,7 @@ class Mail:
 
                 if len(data) > 0:
                     msg_raw = data[0][1]
-                    mail = self.parse_mail(Tool.bin2str(num), msg_raw)
+                    mail = self.parse_mail(Tool.binary_to_string(num), msg_raw)
                     mails.append(mail)
 
             except Exception as mail_error:
@@ -574,7 +588,7 @@ class Mail:
                 max_num = num
 
         if len(mails) > 0:
-            self.last_uid = Tool.bin2str(max_num)
+            self.last_uid = Tool.binary_to_string(max_num)
             logging.info("Got %i new mail(s( to forward, changed UID to %s" % (len(mails), self.last_uid))
         return mails
 
@@ -643,7 +657,7 @@ def main():
                 mailbox.disconnect()
 
             # send mail data via TG bot
-            if len(mails) > 0:
+            if mails is not None and len(mails) > 0:
                 tg_bot.send_message(mails)
 
             if config.imap_push_mode:

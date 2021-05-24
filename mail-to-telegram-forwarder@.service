@@ -1,11 +1,11 @@
 [Unit]
-Description=Mail to Telegram Forwarder Service for %I
+Description=Mail to Telegram Forwarder - Service for: '%i'
 After=network-online.target nss-lookup.target
 Wants=network-online.target nss-lookup.target
 Documentation=https://github.com/awalon/MailToTelegramForwarder/
 
 [Service]
-ExecStart=/usr/local/bin/mailToTelegramForwarder --config /etc/mail-to-telegram-forwarder/%i
+ExecStart=/usr/local/bin/mailToTelegramForwarder --config /etc/mail-to-telegram-forwarder/%i.conf
 User=mail2telegram
 
 [Install]
