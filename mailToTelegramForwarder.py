@@ -3,6 +3,8 @@
 try:
     import sys
     import re
+    import unicodedata
+    import html
     import socket
     import time
     import logging
@@ -37,7 +39,7 @@ class Tool:
         pass
 
     @staticmethod
-    def binary_to_string(value, **kwargs):
+    def binary_to_string(value, **kwargs) -> str:
         encoding = kwargs.get('encoding')
         if not encoding:
             encoding = 'utf-8'
@@ -46,6 +48,7 @@ class Tool:
                 return str(bytes.decode(value, encoding=encoding, errors='replace'))
             except UnicodeDecodeError as decode_error:
                 logging.error("Can not decode value: '", value, "' reason: ", decode_error.reason)
+                return ' ###decoder-error:%s### ' % decode_error.reason
         else:
             return str(value)
 
@@ -179,6 +182,13 @@ class TelegramBot:
         # extract HTML body to get payload from mail
         tg_body = re.sub('.*<body[^>]*>(?P<body>.*)</body>.*$', '\g<body>', message, flags=(re.DOTALL | re.MULTILINE))
 
+        # remove control chars
+        tg_body = "".join(ch for ch in tg_body if "C" != unicodedata.category(ch)[0])
+
+        # remove multiple line breaks and spaces (regular Browser logic)
+        tg_body = re.sub(r'[\r\n]', '', tg_body)
+        tg_body = re.sub(r'\s[\s]+', ' ', tg_body).strip()
+
         # remove all HTML comments
         tg_body = re.sub(r'<!--.*?-->', '', tg_body, flags=(re.DOTALL | re.MULTILINE))
 
@@ -190,9 +200,8 @@ class TelegramBot:
         tg_msg = re.sub(r'<\s*(?P<elem>script|style)\s*>.*?</\s*(?P=elem)\s*>',
                         '', tg_body, flags=(re.DOTALL | re.MULTILINE))
 
-        # remove multiple line breaks and spaces
-        tg_msg = re.sub(r'[\r\n]', '', tg_msg)
-        tg_msg = re.sub(r'\s[\s]+', ' ', tg_msg).strip()
+        # preserve NBSPs
+        tg_msg = re.sub(r'&nbsp;', ' ', tg_msg)
 
         # translate paragraphs and line breaks (block elements)
         tg_msg = re.sub(r'</?\s*(?P<elem>(p|div|table|h\d+))\s*>', '\n', tg_msg, flags=re.MULTILINE)
@@ -212,6 +221,12 @@ class TelegramBot:
         # remove empty links
         tg_msg = re.sub(r'<\s*a\s*>(?P<link>[^<]*)</\s*a\s*>', '\g<link> ', tg_msg, flags=(re.DOTALL | re.MULTILINE))
 
+        # remove links without text (tracking stuff, and none clickable)
+        tg_msg = re.sub(r'<\s*a\s*[^>]*>\s*</\s*a\s*>', ' ', tg_msg, flags=(re.DOTALL | re.MULTILINE))
+
+        # remove empty elements
+        tg_msg = re.sub(r'<\s*\w\s*>\s*</\s*\w\s*>', ' ', tg_msg, flags=(re.DOTALL | re.MULTILINE))
+
         return tg_msg
 
     def send_message(self, mails):
@@ -223,54 +238,85 @@ class TelegramBot:
             tg_chat = bot.get_chat(self.config.tg_forward_to_chat_id)
 
             for mail in mails:
-                if self.config.tg_markdown_version == 2:
-                    parser = telegram.ParseMode.MARKDOWN_V2
-                else:
-                    parser = telegram.ParseMode.MARKDOWN
-                if mail.type == MailData.HTML:
-                    parser = telegram.ParseMode.HTML
+                try:
+                    if self.config.tg_markdown_version == 2:
+                        parser = telegram.ParseMode.MARKDOWN_V2
+                    else:
+                        parser = telegram.ParseMode.MARKDOWN
+                    if mail.type == MailData.HTML:
+                        parser = telegram.ParseMode.HTML
 
-                if self.config.tg_forward_mail_content or not self.config.tg_forward_attachment:
-                    # send mail content (summary)
-                    message = mail.summary
+                    if self.config.tg_forward_mail_content or not self.config.tg_forward_attachment:
+                        # send mail content (summary)
+                        message = mail.summary
 
-                    tg_message = bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
-                                                  parse_mode=parser,
-                                                  text=message,
-                                                  disable_web_page_preview=False)
+                        tg_message = bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
+                                                      parse_mode=parser,
+                                                      text=message,
+                                                      disable_web_page_preview=False)
 
-                    logging.info("Mail summary for '%s' was sent with ID '%i' to '%s' (ID: '%i')"
-                                 % (mail.mail_subject, tg_message.message_id,
-                                    tg_chat.full_name, self.config.tg_forward_to_chat_id))
-
-                if self.config.tg_forward_attachment and len(mail.attachments) > 0:
-                    for attachment in mail.attachments:
-                        subject = mail.mail_subject
-                        if mail.type == MailData.HTML:
-                            file_name = attachment.name
-                            caption = '<b>' + subject + '</b>:\n' + file_name
-                        else:
-                            file_name = telegram.utils.helpers.escape_markdown(
-                                text=attachment.name, version=self.config.tg_markdown_version)
-                            caption = '*' + subject + '*:\n' + file_name
-
-                        tg_message = bot.send_document(chat_id=self.config.tg_forward_to_chat_id,
-                                                       parse_mode=parser,
-                                                       caption=caption,
-                                                       document=attachment.file,
-                                                       filename=attachment.name,
-                                                       disable_content_type_detection=False)
-
-                        logging.info("Attachment '%s' was sent with ID '%i' to '%s' (ID: '%i')"
-                                     % (attachment.name, tg_message.message_id,
+                        logging.info("Mail summary for '%s' was sent with ID '%i' to '%s' (ID: '%i')"
+                                     % (mail.mail_subject, tg_message.message_id,
                                         tg_chat.full_name, self.config.tg_forward_to_chat_id))
+
+                    if self.config.tg_forward_attachment and len(mail.attachments) > 0:
+                        for attachment in mail.attachments:
+                            subject = mail.mail_subject
+                            if mail.type == MailData.HTML:
+                                file_name = attachment.name
+                                caption = '<b>' + subject + '</b>:\n' + file_name
+                            else:
+                                file_name = telegram.utils.helpers.escape_markdown(
+                                    text=attachment.name, version=self.config.tg_markdown_version)
+                                caption = '*' + subject + '*:\n' + file_name
+
+                            tg_message = bot.send_document(chat_id=self.config.tg_forward_to_chat_id,
+                                                           parse_mode=parser,
+                                                           caption=caption,
+                                                           document=attachment.file,
+                                                           filename=attachment.name,
+                                                           disable_content_type_detection=False)
+
+                            logging.info("Attachment '%s' was sent with ID '%i' to '%s' (ID: '%i')"
+                                         % (attachment.name, tg_message.message_id,
+                                            tg_chat.full_name, self.config.tg_forward_to_chat_id))
+
+                except telegram.TelegramError as tg_mail_error:
+                    msg = "Failed to send Telegram message (UID: %s) to '%i': %s" \
+                          % (mail.uid, tg_mail_error.message, self.config.tg_forward_to_chat_id)
+                    logging.critical(msg)
+                    try:
+                        # try to send error via telegram, and ignore further errors
+                        bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
+                                         parse_mode=telegram.ParseMode.MARKDOWN_V2,
+                                         text=telegram.utils.helpers.escape_markdown(msg, version=2),
+                                         disable_web_page_preview=False)
+                    finally:
+                        pass
+                    pass
+
+                except Exception as send_mail_error:
+                    error_msgs = [Tool.binary_to_string(arg) for arg in send_mail_error.args]
+                    msg = "Failed to send Telegram message (UID: %s) to '%i': %s"\
+                          % (mail.uid, self.config.tg_forward_to_chat_id, ', '.join(error_msgs))
+                    logging.critical(msg)
+                    try:
+                        # try to send error via telegram, and ignore further errors
+                        bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
+                                         parse_mode=telegram.ParseMode.MARKDOWN_V2,
+                                         text=telegram.utils.helpers.escape_markdown(msg, version=2),
+                                         disable_web_page_preview=False)
+                    finally:
+                        pass
+                    pass
 
         except telegram.TelegramError as tg_error:
             logging.critical("Failed to send Telegram message: " + tg_error.message)
             return False
 
         except Exception as send_error:
-            logging.critical("Failed to send Telegram message: " + send_error.args[0])
+            error_msgs = [Tool.binary_to_string(arg) for arg in send_error.args]
+            logging.critical("Failed to send Telegram message: %s" % ', '.join(error_msgs))
             return False
 
         return True
@@ -377,8 +423,8 @@ class Mail:
         """
         Get payload from message and return structured body data
         """
-        html = None
-        text = None
+        html_part = None
+        text_part = None
         attachments = []
         index = 1
 
@@ -387,18 +433,18 @@ class Mail:
                 continue
 
             elif part.get_content_type() == 'text/plain':
-                text = part.get_payload(decode=True)
+                text_part = part.get_payload(decode=True)
                 encoding = part.get_content_charset()
                 if not encoding:
                     encoding = 'utf-8'
-                text = bytes(text).decode(encoding).strip()
+                text_part = bytes(text_part).decode(encoding).strip()
 
             elif part.get_content_type() == 'text/html':
-                html = part.get_payload(decode=True)
+                html_part = part.get_payload(decode=True)
                 encoding = part.get_content_charset()
                 if not encoding:
                     encoding = 'utf-8'
-                html = bytes(html).decode(encoding).strip()
+                html_part = bytes(html_part).decode(encoding).strip()
 
             elif part.get_content_charset() is None and part.get_content_disposition() == 'attachment':
                 attachment = MailAttachment()
@@ -409,8 +455,8 @@ class Mail:
                 index += 1
 
         body = MailBody()
-        body.text = text
-        body.html = html
+        body.text = text_part
+        body.html = html_part
         body.attachments = attachments
         return body
 
@@ -465,14 +511,22 @@ class Mail:
 
                     if message_type == MailData.HTML:
                         # add space after links (provide space for touch on link lists)
-                        content = re.sub(r'(?P<a></a>)\s*', '\g<a>\n\n', content, flags=re.MULTILINE)
+                        # '&lt;' keep mail marker together (ex.: &lt;<a href="mailto:t@ex.com">t@ex.xom</a>&gt;)
+                        content = re.sub(r'(?P<a></a>(\s*&gt;)?)\s*', '\g<a>\n\n', content, flags=re.MULTILINE)
 
                     # remove spaces and line breaks on start and end (enhanced strip)
                     content = re.sub(r'^[\s\n]*', '', content)
                     content = re.sub(r'[\s\n]*$', '', content)
 
                     max_len = self.config.imap_max_length
-                    if len(content) > max_len:
+                    content_len = len(content)
+                    if message_type == MailData.HTML:
+                        # get length from parsed HTML (all tags removed)
+                        content_plain = re.sub(r'<[^>]*>', '', content, flags=re.MULTILINE)
+                        # get new max length based on plain text factor
+                        plain_factor = (len(content_plain) / content_len) + float(1)
+                        max_len = int(max_len * plain_factor)
+                    if content_len > max_len:
                         content = content[:max_len] \
                                   + "... (first " + str(max_len) + " characters)"
 
@@ -504,6 +558,7 @@ class Mail:
                 summary_line = "\n"
 
             if message_type == MailData.HTML:
+                mail_from = html.escape(mail_from, quote=True)
                 email_text = "<b>From:</b> " + mail_from + "\n<b>Subject:</b> "
             else:
                 subject = telegram.utils.helpers.escape_markdown(text=subject,
@@ -523,7 +578,7 @@ class Mail:
             mail_data.mail_subject = subject
             mail_data.mail_body = content
             mail_data.summary = email_text
-            mail_data.attachment_summary = email_text
+            mail_data.attachment_summary = attachments_summary
             mail_data.attachments = body.attachments
 
             return mail_data
@@ -575,9 +630,11 @@ class Mail:
                     logging.error("ERROR getting message", num)
                     return
 
-                if len(data) > 0:
-                    msg_raw = data[0][1]
-                    mail = self.parse_mail(Tool.binary_to_string(num), msg_raw)
+                msg_raw = data[0][1]
+                mail = self.parse_mail(Tool.binary_to_string(num), msg_raw)
+                if mail is None:
+                    logging.error("Can't parse mail with UID: %s" % num)
+                else:
                     mails.append(mail)
 
             except Exception as mail_error:
