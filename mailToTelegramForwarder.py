@@ -180,49 +180,56 @@ class TelegramBot:
         #      written in the Python programming language</code></pre>
 
         # extract HTML body to get payload from mail
-        tg_body = re.sub('.*<body[^>]*>(?P<body>.*)</body>.*$', '\g<body>', message, flags=(re.DOTALL | re.MULTILINE))
+        tg_body = re.sub('.*<body[^>]*>(?P<body>.*)</body>.*$', '\g<body>', message,
+                         flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
         # remove control chars
         tg_body = "".join(ch for ch in tg_body if "C" != unicodedata.category(ch)[0])
+
+        # remove all HTML comments
+        tg_body = re.sub(r'<!--.*?-->', '', tg_body, flags=(re.DOTALL | re.MULTILINE))
+
+        # replace img elements by their alt/title attributes
+        tg_body = re.sub(r'<\s*img\s+[^>]*?((title|alt)\s*=\s*"(?P<alt>[^"]+)")?[^>]*?/?\s*>', '\g<alt>', tg_body,
+                         flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
         # remove multiple line breaks and spaces (regular Browser logic)
         tg_body = re.sub(r'[\r\n]', '', tg_body)
         tg_body = re.sub(r'\s[\s]+', ' ', tg_body).strip()
 
-        # remove all HTML comments
-        tg_body = re.sub(r'<!--.*?-->', '', tg_body, flags=(re.DOTALL | re.MULTILINE))
-
         # remove attributes from elements but href of "a"- elements
-        tg_body = re.sub(r'<\s*?(?P<elem>\w+)\b\s*?[^>]*?(?P<ref>\s+href\s*=\s*"[^"]+")?[^>]*?>',
-                         '<\g<elem>\g<ref>>', tg_body, flags=(re.DOTALL | re.MULTILINE))
+        tg_msg = re.sub(r'<\s*?(?P<elem>\w+)\b\s*?[^>]*?(?P<ref>\s+href\s*=\s*"[^"]+")?[^>]*?>',
+                        '<\g<elem>\g<ref>>', tg_body, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
         # remove style and script elements/blocks
         tg_msg = re.sub(r'<\s*(?P<elem>script|style)\s*>.*?</\s*(?P=elem)\s*>',
-                        '', tg_body, flags=(re.DOTALL | re.MULTILINE))
+                        '', tg_msg, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
         # preserve NBSPs
-        tg_msg = re.sub(r'&nbsp;', ' ', tg_msg)
+        tg_msg = re.sub(r'&nbsp;', ' ', tg_msg, flags=re.IGNORECASE)
 
         # translate paragraphs and line breaks (block elements)
-        tg_msg = re.sub(r'</?\s*(?P<elem>(p|div|table|h\d+))\s*>', '\n', tg_msg, flags=re.MULTILINE)
-        tg_msg = re.sub(r'</\s*(?P<elem>(tr))\s*>', '\n', tg_msg, flags=re.MULTILINE)
-        tg_msg = re.sub(r'</?\s*(br)\s*[^>]*>', '\n', tg_msg, flags=re.MULTILINE)
+        tg_msg = re.sub(r'</?\s*(?P<elem>(p|div|table|h\d+))\s*>', '\n', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
+        tg_msg = re.sub(r'</\s*(?P<elem>(tr))\s*>', '\n', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
+        tg_msg = re.sub(r'</?\s*(br)\s*[^>]*>', '\n', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
 
         # prepare list items (migrate list items to "- <text of li element>")
-        tg_msg = re.sub(r'(<\s*[ou]l\s*>[^<]*)?<\s*li\s*>', '\n- ', tg_msg, flags=re.MULTILINE)
-        tg_msg = re.sub(r'</\s*li\s*>([^<]*</\s*[ou]l\s*>)?', '\n', tg_msg, flags=re.MULTILINE)
+        tg_msg = re.sub(r'(<\s*[ou]l\s*>[^<]*)?<\s*li\s*>', '\n- ', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
+        tg_msg = re.sub(r'</\s*li\s*>([^<]*</\s*[ou]l\s*>)?', '\n', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
 
         # remove unsupported tags
-        regex_filter_elem = re.compile('<\s*(?!/?(bold|strong|i|em|u|ins|s|strike|del|b|a|code|pre))[^>]*?>',
+        regex_filter_elem = re.compile('<\s*(?!/?(bold|strong|i|em|u|ins|s|strike|del|b|a|code|pre))\s*[^>]*?>',
                                        flags=re.MULTILINE)
         tg_msg = re.sub(regex_filter_elem, ' ', tg_msg)
-        tg_msg = re.sub(r'</?\s*(img|span)\s*[^>]*>', '', tg_msg, flags=(re.DOTALL | re.MULTILINE))
+        tg_msg = re.sub(r'</?\s*(img|span)\s*[^>]*>', '', tg_msg, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
         # remove empty links
-        tg_msg = re.sub(r'<\s*a\s*>(?P<link>[^<]*)</\s*a\s*>', '\g<link> ', tg_msg, flags=(re.DOTALL | re.MULTILINE))
+        tg_msg = re.sub(r'<\s*a\s*>(?P<link>[^<]*)</\s*a\s*>', '\g<link> ', tg_msg,
+                        flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
         # remove links without text (tracking stuff, and none clickable)
-        tg_msg = re.sub(r'<\s*a\s*[^>]*>\s*</\s*a\s*>', ' ', tg_msg, flags=(re.DOTALL | re.MULTILINE))
+        tg_msg = re.sub(r'<\s*a\s*[^>]*>\s*</\s*a\s*>', ' ', tg_msg,
+                        flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
         # remove empty elements
         tg_msg = re.sub(r'<\s*\w\s*>\s*</\s*\w\s*>', ' ', tg_msg, flags=(re.DOTALL | re.MULTILINE))
@@ -446,6 +453,17 @@ class Mail:
                     encoding = 'utf-8'
                 html_part = bytes(html_part).decode(encoding).strip()
 
+            elif part.get_content_type() == 'message/rfc822':
+                continue
+
+            elif part.get_content_type() == 'text/calendar':
+                attachment = MailAttachment()
+                attachment.idx = index
+                attachment.name = 'invite.ics'
+                attachment.file = part.get_payload(decode=True)
+                attachments.append(attachment)
+                index += 1
+
             elif part.get_content_charset() is None and part.get_content_disposition() == 'attachment':
                 attachment = MailAttachment()
                 attachment.idx = index
@@ -527,8 +545,14 @@ class Mail:
                         plain_factor = (len(content_plain) / content_len) + float(1)
                         max_len = int(max_len * plain_factor)
                     if content_len > max_len:
-                        content = content[:max_len] \
-                                  + "... (first " + str(max_len) + " characters)"
+                        content = content[:max_len]
+                        if message_type == MailData.HTML:
+                            # remove incomplete html tag
+                            content = re.sub(r'<(\s*\w*(\s*[^>]*?)?(</[^>]*)?)?$', '', content)
+                        else:
+                            # remove last "\"
+                            content = re.sub(r'\\*$', '', content)
+                        content += "... (first " + str(max_len) + " characters)"
 
             # attachment summary
             attachments_summary = ""
@@ -540,8 +564,11 @@ class Mail:
                     attachments_summary = "\n\n" + chr(10133) + \
                                           " **" + str(len(body.attachments)) + " attachments:**\n"
                 for attachment in body.attachments:
-                    file_name = telegram.utils.helpers.escape_markdown(
-                        text=attachment.name, version=self.config.tg_markdown_version)
+                    if message_type == MailData.HTML:
+                        file_name = attachment.name
+                    else:
+                        file_name = telegram.utils.helpers.escape_markdown(
+                            text=attachment.name, version=self.config.tg_markdown_version)
                     attachments_summary += "\n " + str(attachment.idx) + ": " + file_name
 
             # subject
