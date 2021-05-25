@@ -212,8 +212,8 @@ See [configuration template](conf/mailToTelegramForwarder.conf)
 
 ### Installing as systemd service
 ```
-cp mail-to-telegram-forwarder@.service /etc/systemd/system/
-systemctl daemon-reload
+sudo cp mail-to-telegram-forwarder@.service /etc/systemd/system/
+sudo systemctl daemon-reload
 ```
 
 ### Start systemd daemon
@@ -223,8 +223,46 @@ are supported on a single server.
 
 You may enable and start the daemon, now:
 ```
-systemctl enable mail-to-telegram-forwarder@mailToTelegramForwarder
-systemctl start mail-to-telegram-forwarder@mailToTelegramForwarder
+# start service with default configuration
+sudo systemctl start mail-to-telegram-forwarder@mailToTelegramForwarder
+
+# check status
+sudo systemctl status mail-to-telegram-forwarder@mailToTelegramForwarder
+
+# enable service, to start default configuration on startup
+sudo systemctl enable mail-to-telegram-forwarder@mailToTelegramForwarder
+```
+
+## Update
+```
+# remove old package
+rm master.zip
+
+# get most recent code from GitHub
+wget https://github.com/awalon/MailToTelegramForwarder/archive/master.zip
+
+# use 'A' to replace [A]ll
+unzip master.zip
+cd MailToTelegramForwarder-master
+
+# "chown" can be skipped, if no dedicated user was created
+sudo chown mail2telegram:mail2telegram mailToTelegramForwarder.py
+sudo chown mail2telegram:mail2telegram conf/mailToTelegramForwarder.conf
+
+# make script executable
+sudo chmod +x mailToTelegramForwarder.py
+
+# copy script to installation folder
+sudo cp mailToTelegramForwarder.py *.md /opt/mailToTelegramForwarder/
+
+# compare configruation file and manually update if needed
+diff -y conf/mailToTelegramForwarder.conf /etc/mail-to-telegram-forwarder/mailToTelegramForwarder.conf
+
+# restart service
+sudo systemctl restart mail-to-telegram-forwarder@mailToTelegramForwarder
+
+# check status
+sudo systemctl status mail-to-telegram-forwarder@mailToTelegramForwarder
 ```
 
 ## Authors
