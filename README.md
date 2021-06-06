@@ -3,7 +3,7 @@
 ## Description
 
 MailToTelegramForwarder is a Python based daemon that will fetch mails 
-from a remote IMAP server and forward the subjects via Telegram API. 
+from a remote IMAP server and forward them via Telegram API. 
 There's no need for a dedicated mail server and piping Alias to a 
 script; you can use any IMAP capable provider like gmail, outlook, 
 self-hosted, etc. to use this feature. Using a dedicated IMAP mailbox 
@@ -83,7 +83,7 @@ sudo vi /etc/mail-to-telegram-forwarder/mailToTelegramForwarder.conf
 At least `server`, `user` and `password` have to be updated for access to your
 Mail server with IMAP support.
 
-`user`: On many servers email/username should be in format `user@hostname.com`.
+`user`9: On many servers email/username should be in format `user@hostname.com`.
 
 `password`:
 If you had enabled 2-factor authentication on your mail server (or Google Account),
