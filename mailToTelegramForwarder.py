@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
+"""
+        Fetch mails from IMAP server and forward them to Telegram Chat.
+        Copyright (C) 2021  Awalon (https://github.com/awalon)
 
+        This program is free software: you can redistribute it and/or modify
+        it under the terms of the GNU General Public License as published by
+        the Free Software Foundation, either version 3 of the License, or
+        (at your option) any later version.
+
+        This program is distributed in the hope that it will be useful,
+        but WITHOUT ANY WARRANTY; without even the implied warranty of
+        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+        GNU General Public License for more details.
+
+        You should have received a copy of the GNU General Public License
+        along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 try:
     import sys
     import re
@@ -12,7 +28,7 @@ try:
     import argparse
     import telegram
     from telegram.utils import helpers
-    import imaplib
+    import imaplib2
     import email
     from email.header import Header, decode_header, make_header
 except ImportError as import_error:
@@ -374,9 +390,9 @@ class Mail:
         """
         self.config = config
         try:
-            self.mailbox = imaplib.IMAP4_SSL(host=config.imap_server,
-                                             port=config.imap_port,
-                                             timeout=config.imap_timeout)
+            self.mailbox = imaplib2.IMAP4_SSL(host=config.imap_server,
+                                              port=config.imap_port,
+                                              timeout=config.imap_timeout)
             rv, data = self.mailbox.login(config.imap_user, config.imap_password)
             if rv != 'OK':
                 return
@@ -388,7 +404,7 @@ class Mail:
             logging.error(msg)
             raise self.MailError(msg, gai_error)
 
-        except imaplib.IMAP4_SSL.error as imap_ssl_error:
+        except imaplib2.IMAP4_SSL.error as imap_ssl_error:
             error_msgs = [Tool.binary_to_string(arg) for arg in imap_ssl_error.args]
             msg = "Login to '%s:%i' failed: %s" % (config.imap_server,
                                                    config.imap_port,
@@ -413,7 +429,7 @@ class Mail:
 
         rv, data = self.mailbox.select(config.imap_folder)
         if rv == 'OK':
-            logging.info("Processing mailbox...\n")
+            logging.info("Processing mailbox...")
         else:
             msg = "ERROR: Unable to open mailbox: %s" % str(rv)
             logging.error(msg)
@@ -623,6 +639,7 @@ class Mail:
         """
         if self.last_uid is None or self.last_uid == '':
             self.last_uid = self.get_last_uid()
+            logging.info("Most recent UID: %s" % self.last_uid)
 
         # build IMAP search string
         search_string = self.config.imap_search
@@ -640,7 +657,7 @@ class Mail:
             if rv != 'OK':
                 logging.info("No messages found!")
                 return
-        except imaplib.IMAP4_SSL.error as search_error:
+        except imaplib2.IMAP4_SSL.error as search_error:
             error_msgs = [Tool.binary_to_string(arg) for arg in search_error.args]
             msg = "Search with '%s' returned: %s" % (search_string, ', '.join(error_msgs))
             if msg != self.previous_error:
