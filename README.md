@@ -1,4 +1,4 @@
-# MailToTelegramForwarder - Service
+# [![Logo](logo/Mail2TelegramForwarder-Bot-small.png)](logo/CREDIT.md) MailToTelegramForwarder - Service
 [![GitHub issues](https://img.shields.io/github/issues/awalon/MailToTelegramForwarder?style=flat-square)](https://github.com/awalon/MailToTelegramForwarder/issues) 
 ![GitHub](https://img.shields.io/badge/version-3-informational?style=flat-square&logo=python)
 ![GitHub](https://img.shields.io/badge/API-Telegram_Bot-informational?style=flat-square&logo=telegram)
@@ -12,7 +12,7 @@ MailToTelegramForwarder is a Python based daemon that will fetch mails
 from a remote IMAP server and forward them via Telegram API. 
 There's no need for a dedicated mail server and piping Alias to a 
 script; you can use any IMAP capable provider like gmail, outlook, 
-self-hosted, etc. to use this feature. Using a dedicated IMAP mailbox 
+self-hosted, etc. to use this feature. Use of a dedicated IMAP mailbox
 is strongly recommended.
 
 The bot only sends messages, it does not respond or listen.
