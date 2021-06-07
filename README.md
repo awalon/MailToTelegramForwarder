@@ -1,4 +1,10 @@
 # MailToTelegramForwarder - Service
+[![GitHub issues](https://img.shields.io/github/issues/awalon/MailToTelegramForwarder?style=flat-square)](https://github.com/awalon/MailToTelegramForwarder/issues) 
+![GitHub](https://img.shields.io/badge/version-3-informational?style=flat-square&logo=python)
+![GitHub](https://img.shields.io/badge/API-Telegram_Bot-informational?style=flat-square&logo=telegram)
+[![GitHub](https://img.shields.io/badge/license-GPL+MIT-informational?style=flat-square)](README.md#license)
+[![GitHub forks](https://img.shields.io/github/forks/awalon/MailToTelegramForwarder?style=flat-square)](https://github.com/awalon/MailToTelegramForwarder/network) 
+[![GitHub stars](https://img.shields.io/github/stars/awalon/MailToTelegramForwarder?style=flat-square)](https://github.com/awalon/MailToTelegramForwarder/stargazers)
 
 ## Description
 
