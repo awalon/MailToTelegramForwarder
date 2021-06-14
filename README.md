@@ -218,7 +218,7 @@ See [configuration template](conf/mailToTelegramForwarder.conf)
 
 ### Installing as systemd service
 ```
-sudo cp mail-to-telegram-forwarder@.service /etc/systemd/system/
+sudo cp systemd/mail-to-telegram-forwarder@.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
@@ -237,6 +237,9 @@ sudo systemctl status mail-to-telegram-forwarder@mailToTelegramForwarder
 
 # enable service, to start default configuration on startup
 sudo systemctl enable mail-to-telegram-forwarder@mailToTelegramForwarder
+
+# check log messages
+sudo journalctl -u mail-to-telegram-forwarder@mailToTelegramForwarder
 ```
 
 ## Update
