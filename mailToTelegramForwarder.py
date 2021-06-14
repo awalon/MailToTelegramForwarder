@@ -300,13 +300,13 @@ class TelegramBot:
                                                            filename=attachment.name,
                                                            disable_content_type_detection=False)
 
-                            logging.info("Attachment '%s' was sent with ID '%i' to '%s' (ID: '%i')"
+                            logging.info("Attachment '%s' was sent with ID '%i' to '%s' (ID: '%s')"
                                          % (attachment.name, tg_message.message_id,
-                                            tg_chat.full_name, self.config.tg_forward_to_chat_id))
+                                            tg_chat.full_name, str(self.config.tg_forward_to_chat_id)))
 
                 except telegram.TelegramError as tg_mail_error:
-                    msg = "Failed to send Telegram message (UID: %s) to '%i': %s" \
-                          % (mail.uid, tg_mail_error.message, self.config.tg_forward_to_chat_id)
+                    msg = "Failed to send Telegram message (UID: %s) to '%s': %s" \
+                          % (mail.uid, tg_mail_error.message, str(self.config.tg_forward_to_chat_id))
                     logging.critical(msg)
                     try:
                         # try to send error via telegram, and ignore further errors
@@ -320,8 +320,8 @@ class TelegramBot:
 
                 except Exception as send_mail_error:
                     error_msgs = [Tool.binary_to_string(arg) for arg in send_mail_error.args]
-                    msg = "Failed to send Telegram message (UID: %s) to '%i': %s"\
-                          % (mail.uid, self.config.tg_forward_to_chat_id, ', '.join(error_msgs))
+                    msg = "Failed to send Telegram message (UID: %s) to '%s': %s"\
+                          % (mail.uid, str(self.config.tg_forward_to_chat_id), ', '.join(error_msgs))
                     logging.critical(msg)
                     try:
                         # try to send error via telegram, and ignore further errors
@@ -334,7 +334,7 @@ class TelegramBot:
                     pass
 
         except telegram.TelegramError as tg_error:
-            logging.critical("Failed to send Telegram message: " + tg_error.message)
+            logging.critical("Failed to send Telegram message: %s" % tg_error.message)
             return False
 
         except Exception as send_error:
@@ -373,9 +373,9 @@ class MailData:
 
 
 class Mail:
-    mailbox = None
-    config = None
-    last_uid = None
+    mailbox: imaplib2.IMAP4_SSL
+    config: Config
+    last_uid: str
 
     previous_error = None
 
@@ -437,9 +437,14 @@ class Mail:
 
     def disconnect(self):
         if self.mailbox is not None:
-            self.mailbox.close()
-            self.mailbox.logout()
-            self.mailbox = None
+            try:
+                self.mailbox.close()
+                self.mailbox.logout()
+            except Exception as ex:
+                logging.debug("Cannot close mailbox: %s" % ', '.join(ex.args))
+                pass
+            finally:
+                del self.mailbox
 
     @staticmethod
     def decode_body(msg) -> MailBody:
@@ -690,7 +695,7 @@ class Mail:
 
         if len(mails) > 0:
             self.last_uid = Tool.binary_to_string(max_num)
-            logging.info("Got %i new mail(s( to forward, changed UID to %s" % (len(mails), self.last_uid))
+            logging.info("Got %i new mail(s) to forward, changed UID to %s" % (len(mails), self.last_uid))
         return mails
 
 
