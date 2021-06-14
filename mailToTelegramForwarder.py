@@ -17,6 +17,7 @@
         along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 try:
+    import warnings
     import sys
     import re
     import unicodedata
@@ -26,8 +27,6 @@ try:
     import logging
     import configparser
     import argparse
-    import telegram
-    from telegram.utils import helpers
     import imaplib2
     import email
     from email.header import Header, decode_header, make_header
@@ -46,8 +45,20 @@ except ImportError as import_error:
 """
 
 __appname__ = "Mail to Telegram Forwarder"
-__version__ = "0.1"
+__version__ = "0.1.2"
 __author__ = "Awalon (https://github.com/awalon)"
+
+with warnings.catch_warnings(record=True) as w:
+    # Cause all warnings to always be triggered.
+    warnings.simplefilter("always")
+
+    from telegram.utils import helpers
+    import telegram
+
+    # Ignore not supported warnings
+    if len(w) > 0:
+        if 'This is allowed but not supported by python-telegram-bot maintainers' in str(w[-1].message):
+            w.remove(w[-1])
 
 
 class Tool:
@@ -171,7 +182,7 @@ class Config:
 
 
 class TelegramBot:
-    config = None
+    config: Config = None
 
     def __init__(self, config):
         self.config = config
@@ -257,8 +268,15 @@ class TelegramBot:
         Send mail data over Telegram API to chat/user.
         """
         try:
-            bot = telegram.Bot(self.config.tg_bot_token)
-            tg_chat = bot.get_chat(self.config.tg_forward_to_chat_id)
+            bot: telegram.Bot = telegram.Bot(self.config.tg_bot_token)
+            tg_chat: telegram.Chat = bot.get_chat(self.config.tg_forward_to_chat_id)
+
+            # get chat title
+            tg_chat_title = tg_chat.full_name
+            if not tg_chat_title:
+                tg_chat_title = tg_chat.title
+            if not tg_chat_title:
+                tg_chat_title = tg_chat.description
 
             for mail in mails:
                 try:
@@ -280,7 +298,7 @@ class TelegramBot:
 
                         logging.info("Mail summary for '%s' was sent with ID '%i' to '%s' (ID: '%i')"
                                      % (mail.mail_subject, tg_message.message_id,
-                                        tg_chat.full_name, self.config.tg_forward_to_chat_id))
+                                        tg_chat_title, self.config.tg_forward_to_chat_id))
 
                     if self.config.tg_forward_attachment and len(mail.attachments) > 0:
                         for attachment in mail.attachments:
@@ -302,7 +320,7 @@ class TelegramBot:
 
                             logging.info("Attachment '%s' was sent with ID '%i' to '%s' (ID: '%s')"
                                          % (attachment.name, tg_message.message_id,
-                                            tg_chat.full_name, str(self.config.tg_forward_to_chat_id)))
+                                            tg_chat_title, str(self.config.tg_forward_to_chat_id)))
 
                 except telegram.TelegramError as tg_mail_error:
                     msg = "Failed to send Telegram message (UID: %s) to '%s': %s" \
@@ -373,9 +391,9 @@ class MailData:
 
 
 class Mail:
-    mailbox: imaplib2.IMAP4_SSL
-    config: Config
-    last_uid: str
+    mailbox: imaplib2.IMAP4_SSL = None
+    config: Config = None
+    last_uid: str = ''
 
     previous_error = None
 
@@ -671,30 +689,33 @@ class Mail:
             return
 
         mails = []
-        max_num = self.last_uid
+        max_num = int(self.last_uid)
         for num in sorted(data[0].split()):
-            try:
-                rv, data = self.mailbox.uid('fetch', num, '(RFC822)')
-                if rv != 'OK':
-                    logging.error("ERROR getting message", num)
-                    return
+            current_uid = int(Tool.binary_to_string(num))
 
-                msg_raw = data[0][1]
-                mail = self.parse_mail(Tool.binary_to_string(num), msg_raw)
-                if mail is None:
-                    logging.error("Can't parse mail with UID: %s" % num)
-                else:
-                    mails.append(mail)
+            if current_uid > max_num:
+                try:
+                    rv, data = self.mailbox.uid('fetch', num, '(RFC822)')
+                    if rv != 'OK':
+                        logging.error("ERROR getting message", num)
+                        return
 
-            except Exception as mail_error:
-                logging.critical("Cannot process mail: %s" % ', '.join(map(str, mail_error.args)))
+                    msg_raw = data[0][1]
+                    mail = self.parse_mail(Tool.binary_to_string(num), msg_raw)
+                    if mail is None:
+                        logging.error("Can't parse mail with UID: %s" % num)
+                    else:
+                        mails.append(mail)
 
-            finally:
-                # remember new UID for next loop
-                max_num = num
+                except Exception as mail_error:
+                    logging.critical("Cannot process mail: %s" % ', '.join(map(str, mail_error.args)))
+
+                finally:
+                    # remember new UID for next loop
+                    max_num = current_uid
 
         if len(mails) > 0:
-            self.last_uid = Tool.binary_to_string(max_num)
+            self.last_uid = str(max_num)
             logging.info("Got %i new mail(s) to forward, changed UID to %s" % (len(mails), self.last_uid))
         return mails
 
