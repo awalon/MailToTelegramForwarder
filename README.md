@@ -89,7 +89,7 @@ sudo vi /etc/mail-to-telegram-forwarder/mailToTelegramForwarder.conf
 At least `server`, `user` and `password` have to be updated for access to your
 Mail server with IMAP support.
 
-`user`9: On many servers email/username should be in format `user@hostname.com`.
+`user`: On many servers email/username should be in format `user@hostname.com`.
 
 `password`:
 If you had enabled 2-factor authentication on your mail server (or Google Account),
