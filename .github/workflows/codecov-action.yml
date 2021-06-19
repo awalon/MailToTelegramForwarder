@@ -1,4 +1,6 @@
-- name: "Upload coverage to Codecov"
+steps:
+  # (Other steps go here)
+- name: Codecov
   # You may pin to the exact commit or the version.
   # uses: codecov/codecov-action@29386c70ef20e286228c72b668a06fd0e8399192
   uses: codecov/codecov-action@v1.5.2
