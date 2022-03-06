@@ -280,7 +280,7 @@ sudo systemctl status mail-to-telegram-forwarder@mailToTelegramForwarder
 ## Authors
 
 - **Florian Paul Hoberg** - *Initial work* -
-  [@florianpaulhoberg](https://github.com/florianpaulhoberg)
+  [@gyptazy](https://github.com/gyptazy)
 - **angelos-se** - *Fork* - 
   [@angelos-se](https://github.com/angelos-se/IMAPBot) based 
   on - *Initial work* - **Luca Weiss** [@z3ntu](https://github.com/z3ntu/IMAPBot)
