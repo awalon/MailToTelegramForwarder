@@ -45,7 +45,7 @@ except ImportError as import_error:
 """
 
 __appname__ = "Mail to Telegram Forwarder"
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 __author__ = "Awalon (https://github.com/awalon)"
 
 with warnings.catch_warnings(record=True) as w:
@@ -95,6 +95,7 @@ class Config:
     imap_search = '(UID ${lastUID}:* UNSEEN)'
     imap_mark_as_read = False
     imap_max_length = 2000
+    imap_read_old_mails = False
 
     tg_bot_token = None
     tg_forward_to_chat_id = None
@@ -124,6 +125,7 @@ class Config:
             self.imap_push_mode = self.get_config('Mail', 'push_mode', self.imap_push_mode, bool)
             self.imap_disconnect = self.get_config('Mail', 'disconnect', self.imap_disconnect, bool)
             self.imap_folder = self.get_config('Mail', 'folder', self.imap_folder)
+            self.imap_read_old_mails = self.get_config('Mail', 'read_old_mails', self.imap_read_old_mails)
             self.imap_search = self.get_config('Mail', 'search', self.imap_search)
             self.imap_mark_as_read = self.get_config('Mail', 'mark_as_read', self.imap_mark_as_read, bool)
             self.imap_max_length = self.get_config('Mail', 'max_length', self.imap_max_length, int)
@@ -137,6 +139,8 @@ class Config:
             self.tg_markdown_version = self.get_config('Telegram', 'markdown_version', self.tg_markdown_version, int)
             self.tg_forward_attachment = self.get_config('Telegram', 'forward_attachment',
                                                          self.tg_forward_attachment, bool)
+            if cmd_args.read_old_mails:
+                self.imap_read_old_mails = True
 
         except configparser.ParsingError as parse_error:
             logging.critical("Error parsing config file: Impossible to parse file %s. Message: %s"
@@ -323,7 +327,7 @@ class TelegramBot:
                                             tg_chat_title, str(self.config.tg_forward_to_chat_id)))
 
                 except telegram.TelegramError as tg_mail_error:
-                    msg = "Failed to send Telegram message (UID: %s) to '%s': %s" \
+                    msg = "❌ Failed to send Telegram message (UID: %s) to '%s': %s" \
                           % (mail.uid, tg_mail_error.message, str(self.config.tg_forward_to_chat_id))
                     logging.critical(msg)
                     try:
@@ -367,6 +371,13 @@ class MailAttachment:
     idx = 0
     name = ''
     file = None
+
+    def set_name(self, file_name):
+        name = ''
+        for file_name_part in email.header.decode_header(file_name):
+            part, encoding = file_name_part
+            name += Tool.binary_to_string(part, encoding=encoding)
+        self.name = name
 
 
 class MailBody:
@@ -521,7 +532,7 @@ class Mail:
             elif part.get_content_charset() is None and part.get_content_disposition() == 'attachment':
                 attachment = MailAttachment()
                 attachment.idx = index
-                attachment.name = str(part.get_filename())
+                attachment.set_name(str(part.get_filename()))
                 attachment.file = part.get_payload(decode=True)
                 attachments.append(attachment)
                 index += 1
@@ -593,7 +604,7 @@ class Mail:
 
                     max_len = self.config.imap_max_length
                     content_len = len(content)
-                    if message_type == MailData.HTML:
+                    if message_type == MailData.HTML and content_len > 0:
                         # get length from parsed HTML (all tags removed)
                         content_plain = re.sub(r'<[^>]*>', '', content, flags=re.MULTILINE)
                         # get new max length based on plain text factor
@@ -713,7 +724,15 @@ class Mail:
             return self.MailError(msg)
 
         mails = []
-        max_num = int(self.last_uid)
+        if self.config.imap_read_old_mails:
+            # ignore current/max UID during first loop
+            max_num = 0
+            self.config.imap_read_old_mails = False
+            logging.info('Ignore max UID %s, as old mails have to be processed first.' % self.last_uid)
+        else:
+            max_num = int(self.last_uid)
+            logging.info('Reading mails having UID greater than %s to ignore mails '
+                         'received before application was started.' % self.last_uid)
         for num in sorted(data[0].split()):
             current_uid = int(Tool.binary_to_string(num))
 
@@ -784,6 +803,8 @@ def main():
 
     args_parser = argparse.ArgumentParser(description='Mail to Telegram Forwarder')
     args_parser.add_argument('-c', '--config', type=str, help='Path to config file', required=True)
+    args_parser.add_argument('-o', '--read-old-mails', action='store_true', required=False,
+                             help='Read mails received, before application was started')
     cmd_args = args_parser.parse_args()
 
     if cmd_args.config is None:

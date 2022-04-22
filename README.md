@@ -86,6 +86,11 @@ now.
 ```
 sudo vi /etc/mail-to-telegram-forwarder/mailToTelegramForwarder.conf
 ```
+### Command line options
+`-c`, `--config`: Configuration file. 
+
+`-o`, `--read-old-mails` (optional): Read mails received before application was started.
+Can be used to overwrite `read_old_mails` as defined by configuration file.
 
 ### Configuration
 #### Mail
@@ -155,6 +160,9 @@ or last loop).
 # Check IMAP specs for more info.
 #search: (UID ${lastUID}:* UNSEEN HEADER Subject "<Subject or Part of Subject>")
 ```
+
+`read_old_mails` [**Default** False]: Read mails received before application was started.
+See command line option `-o` or `--read-old-mails` for one-time use.
 
 `max_length` [**Default** 2000]: Email content will be trimmed, if longer than this
 value. HTML messages will be trimmed to this number of characters after unsupported
