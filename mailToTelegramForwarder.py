@@ -45,7 +45,7 @@ except ImportError as import_error:
 """
 
 __appname__ = "Mail to Telegram Forwarder"
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 __author__ = "Awalon (https://github.com/awalon)"
 
 with warnings.catch_warnings(record=True) as w:
@@ -413,13 +413,14 @@ class Mail:
                                               timeout=config.imap_timeout)
             rv, data = self.mailbox.login(config.imap_user, config.imap_password)
             if rv != 'OK':
-                return
+                msg = "Cannot login to mailbox: %s" % str(rv)
+                raise self.MailError(msg)
 
         except socket.gaierror as gai_error:
             msg = "Connection error '%s:%i': %s" % (config.imap_server,
                                                     config.imap_port,
                                                     gai_error.strerror)
-            logging.error(msg)
+            logging.debug(msg)
             raise self.MailError(msg, gai_error)
 
         except imaplib2.IMAP4_SSL.error as imap_ssl_error:
@@ -427,13 +428,13 @@ class Mail:
             msg = "Login to '%s:%i' failed: %s" % (config.imap_server,
                                                    config.imap_port,
                                                    ', '.join(error_msgs))
-            logging.error(msg)
+            logging.debug(msg)
             raise self.MailError(msg, imap_ssl_error)
 
         except Exception as login_error:
             msg = "Mail error during connection to '%s:%i' failed: %s" \
                   % (config.imap_server, config.imap_port, ', '.join(map(str, login_error.args)))
-            logging.error(msg)
+            logging.debug(msg)
             raise self.MailError(msg, login_error)
 
         rv, mailboxes = self.mailbox.list()
@@ -450,8 +451,22 @@ class Mail:
             logging.info("Processing mailbox...")
         else:
             msg = "ERROR: Unable to open mailbox: %s" % str(rv)
-            logging.error(msg)
+            logging.debug(msg)
             raise self.MailError(msg)
+
+    def is_connected(self):
+        if self.mailbox is not None:
+            try:
+                rv, data = self.mailbox.noop()
+                if rv == 'OK':
+                    logging.debug("Connection is working...")
+                    return True
+            except Exception as connection_check_error:
+                msg = "Error during connection check [noop]: %s" \
+                      % (', '.join(map(str, connection_check_error.args)))
+                logging.error(msg)
+                pass
+        return False
 
     def disconnect(self):
         if self.mailbox is not None:
@@ -680,13 +695,21 @@ class Mail:
             if rv != 'OK':
                 logging.info("No messages found!")
                 return
+
         except imaplib2.IMAP4_SSL.error as search_error:
             error_msgs = [Tool.binary_to_string(arg) for arg in search_error.args]
             msg = "Search with '%s' returned: %s" % (search_string, ', '.join(error_msgs))
             if msg != self.previous_error:
                 logging.error(msg)
             self.previous_error = msg
-            return
+            self.disconnect()
+            raise self.MailError(msg)
+
+        except Exception as search_ex:
+            msg = ', '.join(map(str, search_ex.args))
+            logging.critical("Cannot search mail: %s" % msg)
+            self.disconnect()
+            return self.MailError(msg)
 
         mails = []
         max_num = int(self.last_uid)
@@ -774,23 +797,48 @@ def main():
 
         # Keep polling
         while True:
-            if mailbox is None:
-                mailbox = Mail(config)
+            try:
+                if mailbox is None:
+                    mailbox = Mail(config)
+                else:
+                    if not mailbox.is_connected():  # reconnect on error (broken connection)
+                        mailbox = Mail(config)
 
-            mails = mailbox.search_mails()
+                mails = mailbox.search_mails()
 
-            if config.imap_disconnect:
-                # if not reuse previous connection
-                mailbox.disconnect()
+                if config.imap_disconnect:
+                    # if not reuse previous connection
+                    mailbox.disconnect()
 
-            # send mail data via TG bot
-            if mails is not None and len(mails) > 0:
-                tg_bot.send_message(mails)
+                # send mail data via TG bot
+                if mails is not None and len(mails) > 0:
+                    tg_bot.send_message(mails)
 
-            if config.imap_push_mode:
-                logging.info("IMAP IDLE mode")
-            else:
-                time.sleep(float(config.imap_refresh))
+                if config.imap_push_mode:
+                    logging.info("IMAP IDLE mode")
+                else:
+                    time.sleep(float(config.imap_refresh))
+
+            except Mail.MailError as mail_ex:
+                if len(mail_ex.args) > 0:
+                    logging.critical('Error occurred [mail]: %s' % ', '.join(map(str, mail_ex.args)))
+                else:
+                    logging.critical('Error occurred [mail]: ' + mail_ex.__str__())
+
+                if mailbox is not None:
+                    mailbox.disconnect()
+
+                # ignore errors already handled by Mail- Class
+                pass
+
+            except Exception as loop_error:
+                if len(loop_error.args) > 0:
+                    logging.critical('Error occurred [loop]: %s' % ', '.join(map(str, loop_error.args)))
+                else:
+                    logging.critical('Error occurred [loop]: ' + loop_error.__str__())
+
+                if mailbox is not None:
+                    mailbox.disconnect()
 
     except KeyboardInterrupt:
         logging.critical('Stopping user aborted with CTRL+C')
@@ -800,9 +848,9 @@ def main():
 
     except Exception as main_error:
         if len(main_error.args) > 0:
-            logging.critical('Error occurred: %s' % ', '.join(map(str, main_error.args)))
+            logging.critical('Error occurred [main]: %s' % ', '.join(map(str, main_error.args)))
         else:
-            logging.critical('Error occurred: ' + main_error.__str__())
+            logging.critical('Error occurred [main]: ' + main_error.__str__())
 
     finally:
         if mailbox is not None:
