@@ -96,6 +96,7 @@ class Config:
     imap_mark_as_read = False
     imap_max_length = 2000
     imap_read_old_mails = False
+    imap_read_old_mails_processed = False
 
     tg_bot_token = None
     tg_forward_to_chat_id = None
@@ -328,7 +329,7 @@ class TelegramBot:
 
                 except telegram.TelegramError as tg_mail_error:
                     msg = "❌ Failed to send Telegram message (UID: %s) to '%s': %s" \
-                          % (mail.uid, tg_mail_error.message, str(self.config.tg_forward_to_chat_id))
+                          % (mail.uid, str(self.config.tg_forward_to_chat_id), tg_mail_error.message)
                     logging.critical(msg)
                     try:
                         # try to send error via telegram, and ignore further errors
@@ -724,15 +725,18 @@ class Mail:
             return self.MailError(msg)
 
         mails = []
-        if self.config.imap_read_old_mails:
+        if self.config.imap_read_old_mails and not self.config.imap_read_old_mails_processed:
             # ignore current/max UID during first loop
             max_num = 0
+            # don't repeat this on next loops
             self.config.imap_read_old_mails = False
-            logging.info('Ignore max UID %s, as old mails have to be processed first.' % self.last_uid)
+            logging.info('Ignore max UID %s, as old mails have to be processed first...' % self.last_uid)
         else:
             max_num = int(self.last_uid)
-            logging.info('Reading mails having UID greater than %s to ignore mails '
-                         'received before application was started.' % self.last_uid)
+            if not self.config.imap_read_old_mails_processed:
+                self.config.imap_read_old_mails_processed = True
+                logging.info('Reading mails having UID greater than %s...' % self.last_uid)
+
         for num in sorted(data[0].split()):
             current_uid = int(Tool.binary_to_string(num))
 
