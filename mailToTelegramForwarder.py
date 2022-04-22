@@ -45,7 +45,7 @@ except ImportError as import_error:
 """
 
 __appname__ = "Mail to Telegram Forwarder"
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 __author__ = "Awalon (https://github.com/awalon)"
 
 with warnings.catch_warnings(record=True) as w:
@@ -556,7 +556,8 @@ class Mail:
 
             if self.config.tg_forward_mail_content:
                 # remove useless content
-                content = body.text.replace('()', '').replace('[]', '').strip()
+                if body.text:
+                    content = body.text.replace('()', '').replace('[]', '').strip()
 
                 if self.config.tg_prefer_html:
                     # Prefer HTML
