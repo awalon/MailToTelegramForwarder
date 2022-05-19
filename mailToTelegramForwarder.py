@@ -30,6 +30,7 @@ try:
     import imaplib2
     import email
     from email.header import Header, decode_header, make_header
+    from enum import Enum
 except ImportError as import_error:
     logging.critical(import_error.__class__.__name__ + ": " + import_error.args[0])
     sys.exit(2)
@@ -79,6 +80,28 @@ class Tool:
         else:
             return str(value)
 
+    @staticmethod
+    def build_error_message(message):
+        error_message = message
+        if type(message) is not str:
+            error_message = '%s' % message  # ', '.join(map(str, message.args))
+        try:
+            exc_type, exc_obj, tb = sys.exc_info()
+            line_no = ''
+            obj_name = ''
+            file_name = ''
+            if tb is not None:
+                frame = tb.tb_frame
+                line_no = tb.tb_lineno
+                obj_name = frame.f_code.co_name
+                file_name = frame.f_code.co_filename
+            trace_msg = " [%s:%s in '%s']" % (file_name, line_no, obj_name)
+            error_message = '%s%s' % (error_message, trace_msg)
+        except Exception as ex:
+            logging.error('Fatal in "build_error_message": %s' % str(ex))
+            logging.error('--- initial error: "%s"' % message)
+        return error_message
+
 
 class Config:
     config = None
@@ -104,6 +127,7 @@ class Config:
     tg_markdown_version = 2
     tg_forward_mail_content = True
     tg_forward_attachment = True
+    tg_forward_embedded_images = True
 
     def __init__(self, cmd_args):
         """
@@ -140,15 +164,19 @@ class Config:
             self.tg_markdown_version = self.get_config('Telegram', 'markdown_version', self.tg_markdown_version, int)
             self.tg_forward_attachment = self.get_config('Telegram', 'forward_attachment',
                                                          self.tg_forward_attachment, bool)
+            self.tg_forward_embedded_images = self.get_config('Telegram', 'forward_embedded_images',
+                                                              self.tg_forward_embedded_images, bool)
             if cmd_args.read_old_mails:
                 self.imap_read_old_mails = True
 
         except configparser.ParsingError as parse_error:
-            logging.critical("Error parsing config file: Impossible to parse file %s. Message: %s"
-                             % (parse_error.source, parse_error.message))
+            logging.critical(Tool.build_error_message(
+                "Error parsing config file: Impossible to parse file %s. Message: %s"
+                % (parse_error.source, parse_error.message))
+            )
             sys.exit(2)
         except configparser.Error as config_error:
-            logging.critical("Error parsing config file: %s." % config_error.message)
+            logging.critical(Tool.build_error_message("Error parsing config file: %s." % config_error.message))
             sys.exit(2)
 
     def get_config(self, section, key, default=None, value_type=None):
@@ -176,14 +204,75 @@ class Config:
                 raise configparser.NoSectionError(section)
 
         except configparser.Error as config_error:
-            logging.critical("Error parsing config file: %s." % config_error.message)
+            logging.critical(Tool.build_error_message("Error parsing config file: %s." % config_error.message))
             raise config_error
         except Exception as get_val_error:
-            logging.critical("Get config value error for '%s'.'%s' (default: '%s'): %s."
-                             % (section, key, default, get_val_error))
+            logging.critical(Tool.build_error_message(
+                "Get config value error for '%s'.'%s' (default: '%s'): %s."
+                % (section, key, default, get_val_error))
+            )
             raise get_val_error
 
         return value
+
+
+class MailAttachmentType(Enum):
+    BINARY = 1
+    IMAGE = 2
+
+
+class MailAttachment:
+    idx = 0
+    id = ''
+    name = ''
+    alt = ''
+    type = MailAttachmentType.BINARY
+    file = None
+    tg_id = None
+
+    def __init__(self, attachment_type=MailAttachmentType.BINARY):
+        self.type = attachment_type
+
+    def set_name(self, file_name):
+        name = ''
+        for file_name_part in email.header.decode_header(file_name):
+            part, encoding = file_name_part
+            name += Tool.binary_to_string(part, encoding=encoding)
+        self.name = name
+
+    def set_id(self, attachment_id):
+        self.id = re.sub(r'[<>]', '', attachment_id)
+
+    def get_title(self):
+        if self.alt:
+            return self.alt
+        elif self.name:
+            return self.name
+        else:
+            return self.file
+
+
+class MailBody:
+    text = ''
+    html = ''
+    images: dict[str, MailAttachment] = {}
+    attachments: [MailAttachment] = []
+
+
+class MailData:
+    TEXT = 1
+    HTML = 2
+
+    uid = ''
+    raw = ''
+    type = TEXT
+    summary = ''
+    mail_from = ''
+    mail_subject = ''
+    mail_body = ''
+    mail_images: dict[str, MailAttachment] = {}
+    attachment_summary = ''
+    attachments = [MailAttachment]
 
 
 class TelegramBot:
@@ -193,7 +282,7 @@ class TelegramBot:
         self.config = config
 
     @staticmethod
-    def cleanup_html(message):
+    def cleanup_html(message: str, images: dict[str, MailAttachment] = None) -> str:
         """
         Parse HTML message and remove HTML elements not supported by Telegram
         """
@@ -211,64 +300,93 @@ class TelegramBot:
         # <pre><code class="language-python">pre-formatted fixed-width code block
         #      written in the Python programming language</code></pre>
 
-        # extract HTML body to get payload from mail
-        tg_body = re.sub('.*<body[^>]*>(?P<body>.*)</body>.*$', '\g<body>', message,
-                         flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
+        tg_body = message
+        tg_msg = ''
+        try:
+            # extract HTML body to get payload from mail
+            tg_body = re.sub('.*<body[^>]*>(?P<body>.*)</body>.*$', '\g<body>', tg_body,
+                             flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
-        # remove control chars
-        tg_body = "".join(ch for ch in tg_body if "C" != unicodedata.category(ch)[0])
+            # remove control chars
+            tg_body = "".join(ch for ch in tg_body if "C" != unicodedata.category(ch)[0])
 
-        # remove all HTML comments
-        tg_body = re.sub(r'<!--.*?-->', '', tg_body, flags=(re.DOTALL | re.MULTILINE))
+            # remove all HTML comments
+            tg_body = re.sub(r'<!--.*?-->', '', tg_body, flags=(re.DOTALL | re.MULTILINE))
 
-        # replace img elements by their alt/title attributes
-        tg_body = re.sub(r'<\s*img\s+[^>]*?((title|alt)\s*=\s*"(?P<alt>[^"]+)")?[^>]*?/?\s*>', '\g<alt>', tg_body,
-                         flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
+            # handle inline images
+            image_seen = {}
+            for match in re.finditer(r'(?P<img><\s*img\s+[^>]*?\s*src\s*=\s*"cid:(?P<cid>[^"]*)"[^>]*?/?\s*>)',
+                                     tg_body, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE)):
+                img = match.group('img')
+                cid = match.group('cid')
+                if cid == '' or cid in image_seen:
+                    continue
+                image_seen[cid] = True
 
-        # remove multiple line breaks and spaces (regular Browser logic)
-        tg_body = re.sub(r'[\r\n]', '', tg_body)
-        tg_body = re.sub(r'\s[\s]+', ' ', tg_body).strip()
+                alt = re.sub(r'^.*?((title|alt)\s*=\s*"(?P<alt>[^"]+)")?.*?$', '\g<alt>',
+                             img, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
+                if cid in images:
+                    # add image reference
+                    tg_body = tg_body.replace(img, '${file:%s}' % cid)
+                    # extract alt/title attributes of img elements
+                    images[cid].alt = alt
+                else:
+                    # no file found, use alt text
+                    tg_body = tg_body.replace(img, alt)
 
-        # remove attributes from elements but href of "a"- elements
-        tg_msg = re.sub(r'<\s*?(?P<elem>\w+)\b\s*?[^>]*?(?P<ref>\s+href\s*=\s*"[^"]+")?[^>]*?>',
-                        '<\g<elem>\g<ref>>', tg_body, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
+            # use alt text for all images without cid (embedded image)
+            tg_body = re.sub(r'<\s*img\s+[^>]*?((title|alt)\s*=\s*"(?P<alt>[^"]+)")?[^>]*?/?\s*>', '\g<alt>',
+                             tg_body, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
-        # remove style and script elements/blocks
-        tg_msg = re.sub(r'<\s*(?P<elem>script|style)\s*>.*?</\s*(?P=elem)\s*>',
-                        '', tg_msg, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
+            # remove multiple line breaks and spaces (regular Browser logic)
+            tg_body = re.sub(r'[\r\n]', '', tg_body)
+            tg_body = re.sub(r'\s\s+', ' ', tg_body).strip()
 
-        # preserve NBSPs
-        tg_msg = re.sub(r'&nbsp;', ' ', tg_msg, flags=re.IGNORECASE)
+            # remove attributes from elements but href of "a"- elements
+            tg_msg = re.sub(r'<\s*?(?P<elem>\w+)\b\s*?[^>]*?(?P<ref>\s+href\s*=\s*"[^"]+")?[^>]*?>',
+                            '<\g<elem>\g<ref>>', tg_body, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
-        # translate paragraphs and line breaks (block elements)
-        tg_msg = re.sub(r'</?\s*(?P<elem>(p|div|table|h\d+))\s*>', '\n', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
-        tg_msg = re.sub(r'</\s*(?P<elem>(tr))\s*>', '\n', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
-        tg_msg = re.sub(r'</?\s*(br)\s*[^>]*>', '\n', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
+            # remove style and script elements/blocks
+            tg_msg = re.sub(r'<\s*(?P<elem>script|style)\s*>.*?</\s*(?P=elem)\s*>',
+                            '', tg_msg, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
-        # prepare list items (migrate list items to "- <text of li element>")
-        tg_msg = re.sub(r'(<\s*[ou]l\s*>[^<]*)?<\s*li\s*>', '\n- ', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
-        tg_msg = re.sub(r'</\s*li\s*>([^<]*</\s*[ou]l\s*>)?', '\n', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
+            # preserve NBSPs
+            tg_msg = re.sub(r'&nbsp;', ' ', tg_msg, flags=re.IGNORECASE)
 
-        # remove unsupported tags
-        regex_filter_elem = re.compile('<\s*(?!/?(bold|strong|i|em|u|ins|s|strike|del|b|a|code|pre))\s*[^>]*?>',
-                                       flags=re.MULTILINE)
-        tg_msg = re.sub(regex_filter_elem, ' ', tg_msg)
-        tg_msg = re.sub(r'</?\s*(img|span)\s*[^>]*>', '', tg_msg, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
+            # translate paragraphs and line breaks (block elements)
+            tg_msg = re.sub(r'</?\s*(?P<elem>(p|div|table|h\d+))\s*>', '\n', tg_msg,
+                            flags=(re.MULTILINE | re.IGNORECASE))
+            tg_msg = re.sub(r'</\s*(?P<elem>(tr))\s*>', '\n', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
+            tg_msg = re.sub(r'</?\s*(br)\s*[^>]*>', '\n', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
 
-        # remove empty links
-        tg_msg = re.sub(r'<\s*a\s*>(?P<link>[^<]*)</\s*a\s*>', '\g<link> ', tg_msg,
-                        flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
+            # prepare list items (migrate list items to "- <text of li element>")
+            tg_msg = re.sub(r'(<\s*[ou]l\s*>[^<]*)?<\s*li\s*>', '\n- ', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
+            tg_msg = re.sub(r'</\s*li\s*>([^<]*</\s*[ou]l\s*>)?', '\n', tg_msg, flags=(re.MULTILINE | re.IGNORECASE))
 
-        # remove links without text (tracking stuff, and none clickable)
-        tg_msg = re.sub(r'<\s*a\s*[^>]*>\s*</\s*a\s*>', ' ', tg_msg,
-                        flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
+            # remove unsupported tags
+            regex_filter_elem = re.compile('<\s*(?!/?(bold|strong|i|em|u|ins|s|strike|del|b|a|code|pre))\s*[^>]*?>',
+                                           flags=re.MULTILINE)
+            tg_msg = re.sub(regex_filter_elem, ' ', tg_msg)
+            tg_msg = re.sub(r'</?\s*(img|span)\s*[^>]*>', '', tg_msg, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
-        # remove empty elements
-        tg_msg = re.sub(r'<\s*\w\s*>\s*</\s*\w\s*>', ' ', tg_msg, flags=(re.DOTALL | re.MULTILINE))
+            # remove empty links
+            tg_msg = re.sub(r'<\s*a\s*>(?P<link>[^<]*)</\s*a\s*>', '\g<link> ', tg_msg,
+                            flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
-        return tg_msg
+            # remove links without text (tracking stuff, and none clickable)
+            tg_msg = re.sub(r'<\s*a\s*[^>]*>\s*</\s*a\s*>', ' ', tg_msg,
+                            flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
-    def send_message(self, mails):
+            # remove empty elements
+            tg_msg = re.sub(r'<\s*\w\s*>\s*</\s*\w\s*>', ' ', tg_msg, flags=(re.DOTALL | re.MULTILINE))
+
+        except Exception as ex:
+            logging.critical(Tool.build_error_message(ex))
+
+        finally:
+            return tg_msg
+
+    def send_message(self, mails: [MailData]):
         """
         Send mail data over Telegram API to chat/user.
         """
@@ -295,6 +413,30 @@ class TelegramBot:
                     if self.config.tg_forward_mail_content or not self.config.tg_forward_attachment:
                         # send mail content (summary)
                         message = mail.summary
+
+                        # upload images
+                        image_no = 1
+                        for image_id in mail.mail_images:
+                            image = mail.mail_images[image_id]
+                            title = '%s' % image.get_title()
+
+                            if self.config.tg_forward_embedded_images:
+                                title = '%i. %s: %s' % (image_no, mail.mail_subject, image.get_title())
+                                doc_message: telegram.Message = bot.send_photo(
+                                    chat_id=self.config.tg_forward_to_chat_id,
+                                    parse_mode=parser,
+                                    caption=title,
+                                    photo=image.file,
+                                )
+                                photo_size: [telegram.PhotoSize] = doc_message.photo
+                                image.tg_id = photo_size[0].file_id
+                                # image.tg_id = doc_message.caption
+
+                            message = message.replace(
+                                '${file:%s}' % image.id,
+                                '🖼 %s' % title
+                            )
+                            image_no += 1
 
                         tg_message = bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
                                                       parse_mode=parser,
@@ -330,7 +472,7 @@ class TelegramBot:
                 except telegram.TelegramError as tg_mail_error:
                     msg = "❌ Failed to send Telegram message (UID: %s) to '%s': %s" \
                           % (mail.uid, str(self.config.tg_forward_to_chat_id), tg_mail_error.message)
-                    logging.critical(msg)
+                    logging.critical(Tool.build_error_message(msg))
                     try:
                         # try to send error via telegram, and ignore further errors
                         bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
@@ -345,7 +487,7 @@ class TelegramBot:
                     error_msgs = [Tool.binary_to_string(arg) for arg in send_mail_error.args]
                     msg = "Failed to send Telegram message (UID: %s) to '%s': %s"\
                           % (mail.uid, str(self.config.tg_forward_to_chat_id), ', '.join(error_msgs))
-                    logging.critical(msg)
+                    logging.critical(Tool.build_error_message(msg))
                     try:
                         # try to send error via telegram, and ignore further errors
                         bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
@@ -357,49 +499,15 @@ class TelegramBot:
                     pass
 
         except telegram.TelegramError as tg_error:
-            logging.critical("Failed to send Telegram message: %s" % tg_error.message)
+            logging.critical(Tool.build_error_message("Failed to send Telegram message: %s" % tg_error.message))
             return False
 
         except Exception as send_error:
             error_msgs = [Tool.binary_to_string(arg) for arg in send_error.args]
-            logging.critical("Failed to send Telegram message: %s" % ', '.join(error_msgs))
+            logging.critical(Tool.build_error_message("Failed to send Telegram message: %s" % ', '.join(error_msgs)))
             return False
 
         return True
-
-
-class MailAttachment:
-    idx = 0
-    name = ''
-    file = None
-
-    def set_name(self, file_name):
-        name = ''
-        for file_name_part in email.header.decode_header(file_name):
-            part, encoding = file_name_part
-            name += Tool.binary_to_string(part, encoding=encoding)
-        self.name = name
-
-
-class MailBody:
-    text = ''
-    html = ''
-    attachments = [MailAttachment]
-
-
-class MailData:
-    TEXT = 1
-    HTML = 2
-
-    uid = ''
-    raw = ''
-    type = TEXT
-    summary = ''
-    mail_from = ''
-    mail_subject = ''
-    mail_body = ''
-    attachment_summary = ''
-    attachments = [MailAttachment]
 
 
 class Mail:
@@ -498,14 +606,16 @@ class Mail:
         """
         html_part = None
         text_part = None
-        attachments = []
-        index = 1
+        attachments: [MailAttachment] = []
+        images: dict[str, MailAttachment] = {}
+        index: int = 1
 
         for part in msg.walk():
             if part.get_content_type().startswith('multipart/'):
                 continue
 
             elif part.get_content_type() == 'text/plain':
+                # extract plain text body
                 text_part = part.get_payload(decode=True)
                 encoding = part.get_content_charset()
                 if not encoding:
@@ -513,6 +623,7 @@ class Mail:
                 text_part = bytes(text_part).decode(encoding).strip()
 
             elif part.get_content_type() == 'text/html':
+                # extract HTML body
                 html_part = part.get_payload(decode=True)
                 encoding = part.get_content_charset()
                 if not encoding:
@@ -523,6 +634,7 @@ class Mail:
                 continue
 
             elif part.get_content_type() == 'text/calendar':
+                # extract calendar/appointment files
                 attachment = MailAttachment()
                 attachment.idx = index
                 attachment.name = 'invite.ics'
@@ -530,18 +642,32 @@ class Mail:
                 attachments.append(attachment)
                 index += 1
 
-            elif part.get_content_charset() is None and part.get_content_disposition() == 'attachment':
-                attachment = MailAttachment()
-                attachment.idx = index
-                attachment.set_name(str(part.get_filename()))
-                attachment.file = part.get_payload(decode=True)
-                attachments.append(attachment)
-                index += 1
+            elif part.get_content_charset() is None:
+                if part.get_content_disposition() == 'attachment':
+                    # extract attachments
+                    attachment = MailAttachment()
+                    attachment.idx = index
+                    attachment.set_name(str(part.get_filename()))
+                    attachment.file = part.get_payload(decode=True)
+                    attachments.append(attachment)
+                    index += 1
+
+                elif part.get_content_disposition() == 'inline':
+                    # extract inline images
+                    if part.get_content_type() in ('image/png', 'image/jpeg'):
+                        image = MailAttachment(MailAttachmentType.IMAGE)
+                        image.idx = index
+                        image.set_name(str(part.get_filename()))
+                        image.set_id(part.get('Content-ID', image.name))
+                        image.file = part.get_payload(decode=True)
+                        images[image.id] = image
+                        index += 1
 
         body = MailBody()
         body.text = text_part
         body.html = html_part
         body.attachments = attachments
+        body.images = images
         return body
 
     def get_last_uid(self):
@@ -554,7 +680,7 @@ class Mail:
             return ''
         return Tool.binary_to_string(data[0])
 
-    def parse_mail(self, uid, mail):
+    def parse_mail(self, uid, mail) -> (MailData, None):
         """
         parse data from mail like subject, body and attachments and return structured mail data
         """
@@ -571,11 +697,21 @@ class Mail:
                 if body.text:
                     content = body.text.replace('()', '').replace('[]', '').strip()
 
+                    # insert inline image
+                    if self.config.tg_forward_embedded_images:
+                        for cid in re.finditer(r'\[cid:([^]]*)]', content,
+                                               flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE)):
+                            if cid in body.images:
+                                content = content.replace(
+                                    '[cid:' + cid.string + ']',
+                                    '${file:' + body.images[cid.string].tg_id + '}'
+                                )
+
                 if self.config.tg_prefer_html:
                     # Prefer HTML
                     if body.html:
                         message_type = MailData.HTML
-                        content = TelegramBot.cleanup_html(body.html)
+                        content = TelegramBot.cleanup_html(body.html, body.images)
 
                     elif body.text:
                         content = telegram.utils.helpers.escape_markdown(text=content,
@@ -588,7 +724,7 @@ class Mail:
 
                     elif body.html:
                         message_type = MailData.HTML
-                        content = TelegramBot.cleanup_html(body.html)
+                        content = TelegramBot.cleanup_html(body.html, body.images)
 
                 if content:
                     # remove multiple line breaks (keeping up to 1 empty line)
@@ -671,6 +807,7 @@ class Mail:
             mail_data.mail_from = mail_from
             mail_data.mail_subject = subject
             mail_data.mail_body = content
+            mail_data.mail_images = body.images
             mail_data.summary = email_text
             mail_data.attachment_summary = attachments_summary
             mail_data.attachments = body.attachments
@@ -679,12 +816,12 @@ class Mail:
 
         except Exception as parse_error:
             if len(parse_error.args) > 0:
-                logging.critical("Cannot process mail: " + parse_error.args[0])
+                logging.critical(Tool.build_error_message("Cannot process mail: %s" % parse_error.args[0]))
             else:
-                logging.critical("Cannot process mail: " + parse_error.__str__())
+                logging.critical(Tool.build_error_message("Cannot process mail: %s" % parse_error.__str__()))
             return None
 
-    def search_mails(self):
+    def search_mails(self) -> [MailData]:
         """
         Search mail on remote IMAP server and return list of parsed mails.
         """
@@ -720,7 +857,7 @@ class Mail:
 
         except Exception as search_ex:
             msg = ', '.join(map(str, search_ex.args))
-            logging.critical("Cannot search mail: %s" % msg)
+            logging.critical(Tool.build_error_message("Cannot search mail: %s" % msg))
             self.disconnect()
             return self.MailError(msg)
 
@@ -755,7 +892,8 @@ class Mail:
                         mails.append(mail)
 
                 except Exception as mail_error:
-                    logging.critical("Cannot process mail: %s" % ', '.join(map(str, mail_error.args)))
+                    logging.critical(Tool.build_error_message("Cannot process mail: %s"
+                                                              % ', '.join(map(str, mail_error.args))))
 
                 finally:
                     # remember new UID for next loop
@@ -847,9 +985,10 @@ def main():
 
             except Mail.MailError as mail_ex:
                 if len(mail_ex.args) > 0:
-                    logging.critical('Error occurred [mail]: %s' % ', '.join(map(str, mail_ex.args)))
+                    logging.critical(Tool.build_error_message('Error occurred [mail]: %s'
+                                                              % ', '.join(map(str, mail_ex.args))))
                 else:
-                    logging.critical('Error occurred [mail]: ' + mail_ex.__str__())
+                    logging.critical(Tool.build_error_message('Error occurred [mail]: %s' % mail_ex.__str__()))
 
                 if mailbox is not None:
                     mailbox.disconnect()
@@ -859,9 +998,10 @@ def main():
 
             except Exception as loop_error:
                 if len(loop_error.args) > 0:
-                    logging.critical('Error occurred [loop]: %s' % ', '.join(map(str, loop_error.args)))
+                    logging.critical(Tool.build_error_message('Error occurred [loop]: %s'
+                                                              % ', '.join(map(str, loop_error.args))))
                 else:
-                    logging.critical('Error occurred [loop]: ' + loop_error.__str__())
+                    logging.critical(Tool.build_error_message('Error occurred [loop]: %s' % loop_error.__str__()))
 
                 if mailbox is not None:
                     mailbox.disconnect()
@@ -874,9 +1014,10 @@ def main():
 
     except Exception as main_error:
         if len(main_error.args) > 0:
-            logging.critical('Error occurred [main]: %s' % ', '.join(map(str, main_error.args)))
+            logging.critical(Tool.build_error_message('Error occurred [main]: %s'
+                                                      % ', '.join(map(str, main_error.args))))
         else:
-            logging.critical('Error occurred [main]: ' + main_error.__str__())
+            logging.critical(Tool.build_error_message('Error occurred [main]: %s' % main_error.__str__()))
 
     finally:
         if mailbox is not None:

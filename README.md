@@ -224,6 +224,14 @@ forwarded:
 #forward_attachment: True
 ```
 
+Extract embedded image(s), send them before mail content and add placeholders at original
+position with captions of image:
+
+```
+# forward embedded images: [True|False]
+#forward_embedded_images: True
+```
+
 See [configuration template](conf/mailToTelegramForwarder.conf) 
 `conf/mailToTelegramForwarder.conf` for further information.
 
