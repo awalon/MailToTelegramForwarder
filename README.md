@@ -42,8 +42,7 @@ To run "mailToTelegramForwarder.py" you have to make sure Python
 
 For Debian 11.x (Bullseye) these packages have to be installed:
 
-**Hint**: python3-python-telegram-bot could be available with Bullseye 
-(Testing, 25th of May 2012)
+**Hint**: python3-python-telegram-bot is available since Bullseye.
 ```
 sudo apt install python3-python-telegram-bot python3-imaplib2
 ```
