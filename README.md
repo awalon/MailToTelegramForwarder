@@ -306,6 +306,6 @@ sudo systemctl status mail-to-telegram-forwarder@mailToTelegramForwarder
 ## License
 
 This project is licensed under the *GPLv3 License* - see the 
-[LICENSE.md](LICENSE.md) file for details -, same parts 
+[LICENSE.md](LICENSE.md) file for details, some parts 
 (from IMAPBot) are licensed under the *The MIT License (MIT)* - 
-see the [LICENSE-MIT.md](LICENSE-MIT.md) file for details -.
+see the [LICENSE-MIT.md](LICENSE-MIT.md) file for details.
