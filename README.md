@@ -174,6 +174,18 @@ Expectation: Forwarded content will be smaller than this value.
 # max length (characters) of forwarded mail content
 #max_length: 2000
 ```
+
+`ignore_inline_image` Ignore embedded image(s) if regular expression matches source attribute.
+
+**Example**: Remove 1x1 pixel image used for layout based on file name using
+`ignore_inline_image: (spacer\.gif)`:
+`<img src="http://img.mitarbeiterangebote.de/images/newsletter/spacer.gif"/>`
+
+```
+# ignore inline image by regular expression
+#ignore_inline_image: (spacer\.gif)
+```
+
 #### Telegram
 `bot_token`: When the bot is registered via [@botfather](https://telegram.me/botfather)
 it will get a unique and long token. Enter this token here (ex.: `123456789:djc28e398e223lkje`).

@@ -47,7 +47,7 @@ except ImportError as import_error:
 """
 
 __appname__ = "Mail to Telegram Forwarder"
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 __author__ = "Awalon (https://github.com/awalon)"
 
 with warnings.catch_warnings(record=True) as w:
@@ -139,6 +139,7 @@ class Config:
     imap_max_length = 2000
     imap_read_old_mails = False
     imap_read_old_mails_processed = False
+    imap_ignore_inline_image = ''
 
     tg_bot_token = None
     tg_forward_to_chat_id = None
@@ -175,6 +176,8 @@ class Config:
             self.imap_search = self.get_config('Mail', 'search', self.imap_search)
             self.imap_mark_as_read = self.get_config('Mail', 'mark_as_read', self.imap_mark_as_read, bool)
             self.imap_max_length = self.get_config('Mail', 'max_length', self.imap_max_length, int)
+            self.imap_ignore_inline_image = self.get_config('Mail', 'ignore_inline_image',
+                                                            self.imap_ignore_inline_image)
 
             self.tg_bot_token = self.get_config('Telegram', 'bot_token', self.tg_bot_token)
             tool.mask_error_data.append(self.tg_bot_token)
@@ -312,8 +315,7 @@ class TelegramBot:
     def __init__(self, config: Config):
         self.config = config
 
-    @staticmethod
-    def cleanup_html(message: str, images: typing.Optional[dict[str, MailAttachment]] = None) -> str:
+    def cleanup_html(self, message: str, images: typing.Optional[dict[str, MailAttachment]] = None) -> str:
         """
         Parse HTML message and remove HTML elements not supported by Telegram
         """
@@ -351,7 +353,7 @@ class TelegramBot:
             image_seen: dict[str] = {}
             for match in re.finditer(
                     r'(?P<img><\s*img\s+[^>]*?\s*src\s*=\s*"'
-                    r'(?P<src>(?P<proto>(cid|https?):/*(?P<cid>[^"]*)))"[^>]*?/?\s*>)',
+                    r'(?P<src>(?P<proto>(cid|https?)):/*(?P<cid>[^"]*))"[^>]*?/?\s*>)',
                     tg_body,
                     flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE)):
                 img: str = match.group('img')
@@ -364,6 +366,9 @@ class TelegramBot:
                 if 'http' in proto:
                     # web link
                     src = match.group('src')
+                    if self.config.imap_ignore_inline_image \
+                            and re.search(self.config.imap_ignore_inline_image, src, re.IGNORECASE):
+                        continue
                     tg_body = tg_body.replace(img, "${img-link:%s|%s}" % (src, alt))
                 else:
                     # attached/embedded image
@@ -501,8 +506,9 @@ class TelegramBot:
                                                       text=message,
                                                       disable_web_page_preview=False)
 
-                        logging.info("Mail summary for '%s' was sent with ID '%i' to '%s' (ID: '%i')"
-                                     % (mail.mail_subject, tg_message.message_id,
+                        logging.info("Mail summary for '%s' (UID: '%s') was sent"
+                                     " with message ID '%i' to '%s' (ID: '%i')"
+                                     % (mail.mail_subject, mail.uid, tg_message.message_id,
                                         tg_chat_title, self.config.tg_forward_to_chat_id))
 
                     if self.config.tg_forward_attachment and len(mail.attachments) > 0:
@@ -726,7 +732,7 @@ class Mail:
         body.images = images
         return body
 
-    def get_last_uid(self):
+    def get_last_uid(self) -> str:
         """
         get UID of most recent mail
         """
@@ -799,10 +805,10 @@ class Mail:
                     max_len = self.config.imap_max_length
                     content_len = len(content)
                     if message_type == MailDataType.HTML and content_len > 0:
-                        # get length from parsed HTML (all tags removed)
-                        content_plain = re.sub(r'<[^>]*>', '', content, flags=re.MULTILINE)
+                        # get length of parsed HTML (all tags and masked images (ex.: '${<image>|<title>}') removed)
+                        content_plain: str = re.sub(r'(<[^>]*>)|(\${[^}]+})', '', content, flags=re.MULTILINE)
                         # get new max length based on plain text factor
-                        plain_factor = (len(content_plain) / content_len) + float(1)
+                        plain_factor: float = (len(content_plain) / content_len) + float(1)
                         max_len = int(max_len * plain_factor)
                     if content_len > max_len:
                         content = content[:max_len]
@@ -882,7 +888,7 @@ class Mail:
         """
         if self.last_uid is None or self.last_uid == '':
             self.last_uid = self.get_last_uid()
-            logging.info("Most recent UID: %s" % self.last_uid)
+            logging.info("Most recent UID: '%s'" % self.last_uid)
 
         # build IMAP search string
         search_string = self.config.imap_search
@@ -919,43 +925,45 @@ class Mail:
         mails = []
         if self.config.imap_read_old_mails and not self.config.imap_read_old_mails_processed:
             # ignore current/max UID during first loop
-            max_num = 0
+            max_uid = ''
             # don't repeat this on next loops
             self.config.imap_read_old_mails = False
-            logging.info('Ignore max UID %s, as old mails have to be processed first...' % self.last_uid)
+            logging.info("Ignore most recent UID '%s', as old mails have to be processed first..." % self.last_uid)
         else:
-            max_num = int(self.last_uid)
+            max_uid = self.last_uid
             if not self.config.imap_read_old_mails_processed:
                 self.config.imap_read_old_mails_processed = True
-                logging.info('Reading mails having UID greater than %s...' % self.last_uid)
+                logging.info("Reading mails having UID more recent than '%s', using search: '%s'"
+                             % (self.last_uid, search_string))
 
-        for num in sorted(data[0].split()):
-            current_uid = int(self.config.tool.binary_to_string(num))
+        for cur_uid in sorted(data[0].split()):
+            current_uid = self.config.tool.binary_to_string(cur_uid)
 
-            if current_uid > max_num:
-                try:
-                    rv, data = self.mailbox.uid('fetch', num, '(RFC822)')
-                    if rv != 'OK':
-                        logging.error("ERROR getting message: %s" % num)
-                        return
+            try:
+                rv, data = self.mailbox.uid('fetch', cur_uid, '(RFC822)')
+                if rv != 'OK':
+                    logging.error("ERROR getting message: %s" % current_uid)
+                    return
 
-                    msg_raw = data[0][1]
-                    mail = self.parse_mail(self.config.tool.binary_to_string(num), msg_raw)
-                    if mail is None:
-                        logging.error("Can't parse mail with UID: %s" % num)
-                    else:
-                        mails.append(mail)
+                msg_raw = data[0][1]
+                mail = self.parse_mail(current_uid, msg_raw)
+                if mail is None:
+                    logging.error("Can't parse mail with UID: '%s'" % current_uid)
+                else:
+                    logging.info("Parsed mail with UID '%s': '%s'" % (current_uid, mail.mail_subject))
+                    mails.append(mail)
 
-                except Exception as mail_error:
-                    logging.critical("Cannot process mail: %s" % ', '.join(map(str, mail_error.args)))
+            except Exception as mail_error:
+                logging.critical("Cannot process mail with UID '%s': %s" % (current_uid,
+                                                                            ', '.join(map(str, mail_error.args))))
 
-                finally:
-                    # remember new UID for next loop
-                    max_num = current_uid
+            finally:
+                # remember new UID for next loop
+                max_uid = current_uid
 
         if len(mails) > 0:
-            self.last_uid = str(max_num)
-            logging.info("Got %i new mail(s) to forward, changed UID to %s" % (len(mails), self.last_uid))
+            self.last_uid = max_uid
+            logging.info("Got %i new mail(s) to forward, using most recent UID: '%s'" % (len(mails), self.last_uid))
         return mails
 
 
