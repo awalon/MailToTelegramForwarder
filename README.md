@@ -7,6 +7,8 @@
 [![GitHub forks](https://img.shields.io/github/forks/awalon/MailToTelegramForwarder?style=flat-square)](https://github.com/awalon/MailToTelegramForwarder/network) 
 [![GitHub stars](https://img.shields.io/github/stars/awalon/MailToTelegramForwarder?style=flat-square)](https://github.com/awalon/MailToTelegramForwarder/stargazers)
 
+[![BuyMeCoffee][buymecoffeebadge]][buymecoffee]
+
 [![codecov](https://codecov.io/gh/awalon/MailToTelegramForwarder/branch/master/graph/badge.svg?style=flat-square&token=6JYTQ90U9M)](https://codecov.io/gh/awalon/MailToTelegramForwarder)
 
 ## Description
@@ -321,3 +323,6 @@ This project is licensed under the *GPLv3 License* - see the
 [LICENSE.md](LICENSE.md) file for details, some parts 
 (from IMAPBot) are licensed under the *The MIT License (MIT)* - 
 see the [LICENSE-MIT.md](LICENSE-MIT.md) file for details.
+---
+[buymecoffee]: https://www.buymeacoffee.com/awalonde
+[buymecoffeebadge]: https://www.buymeacoffee.com/assets/img/custom_images/yellow_img.png
