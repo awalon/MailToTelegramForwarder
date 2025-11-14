@@ -498,8 +498,8 @@ class TelegramBot:
             # Initialize the Bot with HTTPXRequest with increased connection pool size and proper timeouts
             request = HTTPXRequest(
                 connection_pool_size=20,
-                connect_timeout=60,  # Connection timeout in seconds
-                read_timeout=60  # Read timeout in seconds
+                connect_timeout=120,  # Connection timeout in seconds
+                read_timeout=120  # Read timeout in seconds
             )
             async with Bot(token=self.config.tg_bot_token, request=request) as bot:
 
