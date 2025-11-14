@@ -40,14 +40,21 @@ To run "mailToTelegramForwarder.py" you have to make sure Python
 - email
 - telegram-bot
 - imaplib2
+- beautifulsoup4 (HTML parser, used to fix broken HTML structure)
 ```
 
-For Debian 11.x (Bullseye) these packages have to be installed:
+For Debian 13.x (Trixie) these packages have to be installed:
 
 **Hint**: python3-python-telegram-bot is available since Bullseye.
 ```
-sudo apt install python3-python-telegram-bot python3-imaplib2
+sudo apt install python3-python-telegram-bot python3-imaplib2 python3-bs4
 ```
+
+For Arch (CachyOS) these packages have to be installed:
+```
+yay -Su python-telegram-bot python-imaplib2 python-beautifulsoup4
+```
+
 
 #### Create dedicated system user
 

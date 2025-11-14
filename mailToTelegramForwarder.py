@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-        Fetch mails from IMAP server and forward them to Telegram Chat.
-        Copyright (C) 2021  Awalon (https://github.com/awalon)
+        Fetch mails from IMAP-Server and forward them to Telegram Chat.
+        Copyright (C) 2021 Awalon (https://github.com/awalon)
 
         This program is free software: you can redistribute it and/or modify
         it under the terms of the GNU General Public License as published by
@@ -15,22 +15,51 @@
 
         You should have received a copy of the GNU General Public License
         along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+---
+
+        Debian:
+            apt install python3-python-telegram-bot python3-imaplib2 python3-bs4
+        Arch:
+            yay -Su python-telegram-bot python-imaplib2 python-beautifulsoup4
+
 """
+
 try:
-    import warnings
-    import typing
-    import sys
-    import re
-    import unicodedata
-    import html
-    import socket
-    import time
+    from bs4 import BeautifulSoup
+    # noinspection except,PyUnusedImports
+    import asyncio
+    # noinspection except,PyUnusedImports
+    import contextlib
+    # noinspection except,PyUnusedImports
     import logging
-    import configparser
+    # noinspection except,PyUnusedImports
+    import warnings
+    # noinspection except,PyUnusedImports
+    import typing
+    # noinspection except,PyUnusedImports
+    import sys
+    # noinspection except,PyUnusedImports
+    import re
+    # noinspection except,PyUnusedImports
+    import unicodedata
+    # noinspection except
     import argparse
+    # noinspection except
+    import html
+    # noinspection except
+    import socket
+    # noinspection except
+    import time
+    # noinspection except
+    import configparser
+    # noinspection except
     import imaplib2
+    # noinspection except
     import email
+    # noinspection except
     from email.header import Header, decode_header, make_header
+    # noinspection except
     from enum import Enum
 except ImportError as import_error:
     logging.critical(import_error.__class__.__name__ + ": " + import_error.args[0])
@@ -54,8 +83,14 @@ with warnings.catch_warnings(record=True) as w:
     # Cause all warnings to always be triggered.
     warnings.simplefilter("always")
 
-    from telegram.utils import helpers
-    import telegram
+    try:
+        from utils import helpers
+    except ImportError as import_error:
+        from telegram import helpers, Bot
+    from telegram import error, Message, PhotoSize, Bot, ChatFullInfo
+    from telegram.request import HTTPXRequest
+    from telegram.constants import ParseMode
+
 
     # Ignore not supported warnings
     if len(w) > 0:
@@ -94,7 +129,7 @@ class Tool:
         if type(message) is not str:
             error_message = '%s' % message  # ', '.join(map(str, message.args))
         try:
-            exc_type, exc_obj, tb = sys.exc_info()
+            _, _, tb = sys.exc_info()
             if tb is not None:
                 frame = tb.tb_frame
                 line_no = tb.tb_lineno
@@ -311,9 +346,20 @@ class MailData:
 
 class TelegramBot:
     config: Config
+    _error_snd_message: "Failed to send Telegram message: %s"
 
     def __init__(self, config: Config):
         self.config = config
+        try:
+            # Initialize the Bot with HTTPXRequest with increased connection pool size and proper timeouts
+            request = HTTPXRequest(
+                connection_pool_size=20,
+                connect_timeout=60,  # Connection timeout in seconds
+                read_timeout=60  # Read timeout in seconds
+            )
+            self.bot = Bot(token=self.config.tg_bot_token, request=request)
+        except error.TelegramError as tg_error:
+            logging.critical(_error_send_message % tg_error.message)
 
     def cleanup_html(self, message: str, images: typing.Optional[dict[str, MailAttachment]] = None) -> str:
         """
@@ -339,8 +385,11 @@ class TelegramBot:
         tg_body: str = message
         tg_msg: str = ''
         try:
+            soup = BeautifulSoup(tg_body, 'html.parser')
+            tg_body = soup.prettify()
+
             # extract HTML body to get payload from mail
-            tg_body = re.sub(r'.*<body[^>]*>(?P<body>.*)</body>.*$', '\g<body>', tg_body,
+            tg_body = re.sub(r'.*<body[^>]*>(?P<body>.*)</body>.*$', r'\g<body>', tg_body,
                              flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
             # remove control chars
@@ -360,7 +409,7 @@ class TelegramBot:
                 proto: str = match.group('proto')
 
                 # extract alt or title value
-                alt: str = re.sub(r'^.*?((title|alt)\s*=\s*"(?P<alt>[^"]+)")?.*$', '\g<alt>',
+                alt: str = re.sub(r'^.*?((title|alt)\s*=\s*"(?P<alt>[^"]+)")?.*$', r'\g<alt>',
                                   img, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
                 if 'http' in proto:
@@ -387,7 +436,7 @@ class TelegramBot:
                         tg_body = tg_body.replace(img, alt)
 
             # use alt text for all images without cid (embedded image)
-            tg_body = re.sub(r'<\s*img\s+[^>]*?((title|alt)\s*=\s*"(?P<alt>[^"]+)")?[^>]*?/?\s*>', '\g<alt>',
+            tg_body = re.sub(r'<\s*img\s+[^>]*?((title|alt)\s*=\s*"(?P<alt>[^"]+)")?[^>]*?/?\s*>', r'\g<alt>',
                              tg_body, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
             # remove multiple line breaks and spaces (regular Browser logic)
@@ -395,7 +444,7 @@ class TelegramBot:
 
             # remove attributes from elements but href of "a"- elements
             tg_msg = re.sub(r'<\s*?(?P<elem>\w+)\b\s*?[^>]*?(?P<ref>\s+href\s*=\s*"[^"]+")?[^>]*?>',
-                            '<\g<elem>\g<ref>>', tg_body, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
+                            r'<\g<elem>\g<ref>>', tg_body, flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
             # remove style and script elements/blocks
             tg_msg = re.sub(r'<\s*(?P<elem>script|style)\s*>.*?</\s*(?P=elem)\s*>',
@@ -419,7 +468,7 @@ class TelegramBot:
             tg_msg = re.sub(regex_filter_elem, ' ', tg_msg)
 
             # remove empty links
-            tg_msg = re.sub(r'<\s*a\s*>(?P<link>[^<]*)</\s*a\s*>', '\g<link> ', tg_msg,
+            tg_msg = re.sub(r'<\s*a\s*>(?P<link>[^<]*)</\s*a\s*>', r'\g<link> ', tg_msg,
                             flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE))
 
             # remove links without text (tracking stuff, and none clickable)
@@ -440,133 +489,140 @@ class TelegramBot:
 
         return tg_msg
 
-    def send_message(self, mails: [MailData]):
+    async def send_message(self, mails: [MailData]):
         """
         Send mail data over Telegram API to chat/user.
         """
         try:
-            bot: telegram.Bot = telegram.Bot(self.config.tg_bot_token)
-            tg_chat: telegram.Chat = bot.get_chat(self.config.tg_forward_to_chat_id)
+            # Initialize the Bot with HTTPXRequest with increased connection pool size and proper timeouts
+            request = HTTPXRequest(
+                connection_pool_size=20,
+                connect_timeout=60,  # Connection timeout in seconds
+                read_timeout=60  # Read timeout in seconds
+            )
+            async with Bot(token=self.config.tg_bot_token, request=request) as bot:
 
-            # get chat title
-            tg_chat_title = tg_chat.full_name
-            if not tg_chat_title:
-                tg_chat_title = tg_chat.title
-            if not tg_chat_title:
-                tg_chat_title = tg_chat.description
+                tg_chat: ChatFullInfo = await bot.get_chat(self.config.tg_forward_to_chat_id)
 
-            for mail in mails:
-                try:
-                    if self.config.tg_markdown_version == 2:
-                        parser = telegram.ParseMode.MARKDOWN_V2
-                    else:
-                        parser = telegram.ParseMode.MARKDOWN
-                    if mail.type == MailDataType.HTML:
-                        parser = telegram.ParseMode.HTML
+                # get chat title
+                tg_chat_title = tg_chat.full_name
+                if not tg_chat_title:
+                    tg_chat_title = tg_chat.title
+                if not tg_chat_title:
+                    tg_chat_title = tg_chat.id
 
-                    if self.config.tg_forward_mail_content or not self.config.tg_forward_attachment:
-                        # send mail content (summary)
-                        message = mail.summary
+                for mail in mails:
+                    try:
+                        if self.config.tg_markdown_version == 2:
+                            parser = ParseMode.MARKDOWN_V2
+                        else:
+                            parser = ParseMode.MARKDOWN
+                        if mail.type == MailDataType.HTML:
+                            parser = ParseMode.HTML
 
-                        # upload images
-                        image_no = 1
-                        for image_id in mail.mail_images:
-                            image = mail.mail_images[image_id]
-                            title = '%s' % image.get_title()
+                        if self.config.tg_forward_mail_content or not self.config.tg_forward_attachment:
+                            # send mail content (summary)
+                            message = mail.summary
 
-                            if self.config.tg_forward_embedded_images:
-                                title = '%i. %s: %s' % (image_no, mail.mail_subject, image.get_title())
-                                doc_message: telegram.Message = bot.send_photo(
-                                    chat_id=self.config.tg_forward_to_chat_id,
-                                    parse_mode=parser,
-                                    caption=title,
-                                    photo=image.file,
+                            # upload images
+                            image_no = 1
+                            for image_id in mail.mail_images:
+                                image = mail.mail_images[image_id]
+                                title = '%s' % image.get_title()
+
+                                if self.config.tg_forward_embedded_images:
+                                    title = '%i. %s: %s' % (image_no, mail.mail_subject, image.get_title())
+                                    doc_message: Message = await self.bot.send_photo(
+                                        chat_id=self.config.tg_forward_to_chat_id,
+                                        parse_mode=parser,
+                                        caption=title,
+                                        photo=image.file,
+                                    )
+                                    photo_size: [PhotoSize] = doc_message.photo
+                                    image.tg_id = photo_size[0].file_id
+
+                                message = message.replace(
+                                    '${file:%s}' % image.id,
+                                    '🖼 %s' % title
                                 )
-                                photo_size: [telegram.PhotoSize] = doc_message.photo
-                                image.tg_id = photo_size[0].file_id
+                                image_no += 1
 
-                            message = message.replace(
-                                '${file:%s}' % image.id,
-                                '🖼 %s' % title
-                            )
-                            image_no += 1
+                            # write image links
+                            for img_link in re.finditer(r'(\${img-link:(?P<src>[^|]*)\|(?P<alt>[^}]*)})', message,
+                                                        flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE)):
+                                src = img_link.group('src')
+                                alt = img_link.group('alt')
+                                message = message.replace(
+                                    img_link.groups()[0],
+                                    '<a href="%s">🖼 %s</a>' % (src, alt)
+                                )
 
-                        # write image links
-                        for img_link in re.finditer(r'(\${img-link:(?P<src>[^|]*)\|(?P<alt>[^}]*)})', message,
-                                                    flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE)):
-                            src = img_link.group('src')
-                            alt = img_link.group('alt')
-                            message = message.replace(
-                                img_link.groups()[0],
-                                '<a href="%s">🖼 %s</a>' % (src, alt)
-                            )
+                            tg_message: Message = await self.bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
+                                                                              parse_mode=parser,
+                                                                              text=message,
+                                                                              disable_web_page_preview=False)
 
-                        tg_message = bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
-                                                      parse_mode=parser,
-                                                      text=message,
-                                                      disable_web_page_preview=False)
+                            logging.info("Mail summary for '%s' (UID: '%s') was sent"
+                                         " with message ID '%i' to '%s' (ID: '%i')"
+                                         % (mail.mail_subject, mail.uid, tg_message.message_id,
+                                            tg_chat_title, self.config.tg_forward_to_chat_id))
 
-                        logging.info("Mail summary for '%s' (UID: '%s') was sent"
-                                     " with message ID '%i' to '%s' (ID: '%i')"
-                                     % (mail.mail_subject, mail.uid, tg_message.message_id,
-                                        tg_chat_title, self.config.tg_forward_to_chat_id))
+                        if self.config.tg_forward_attachment and len(mail.attachments) > 0:
+                            for attachment in mail.attachments:
+                                subject = mail.mail_subject
+                                if mail.type == MailDataType.HTML:
+                                    file_name = attachment.name
+                                    caption = '<b>' + subject + '</b>:\n' + file_name
+                                else:
+                                    file_name = helpers.escape_markdown(
+                                        text=attachment.name, version=self.config.tg_markdown_version)
+                                    caption = '*' + subject + '*:\n' + file_name
 
-                    if self.config.tg_forward_attachment and len(mail.attachments) > 0:
-                        for attachment in mail.attachments:
-                            subject = mail.mail_subject
-                            if mail.type == MailDataType.HTML:
-                                file_name = attachment.name
-                                caption = '<b>' + subject + '</b>:\n' + file_name
-                            else:
-                                file_name = telegram.utils.helpers.escape_markdown(
-                                    text=attachment.name, version=self.config.tg_markdown_version)
-                                caption = '*' + subject + '*:\n' + file_name
+                                tg_message = await self.bot.send_document(chat_id=self.config.tg_forward_to_chat_id,
+                                                                          parse_mode=parser,
+                                                                          caption=caption,
+                                                                          document=attachment.file,
+                                                                          filename=attachment.name,
+                                                                          disable_content_type_detection=False)
 
-                            tg_message = bot.send_document(chat_id=self.config.tg_forward_to_chat_id,
-                                                           parse_mode=parser,
-                                                           caption=caption,
-                                                           document=attachment.file,
-                                                           filename=attachment.name,
-                                                           disable_content_type_detection=False)
+                                logging.info("Attachment '%s' was sent with ID '%i' to '%s' (ID: '%s')"
+                                             % (attachment.name, tg_message.message_id,
+                                                tg_chat_title, str(self.config.tg_forward_to_chat_id)))
 
-                            logging.info("Attachment '%s' was sent with ID '%i' to '%s' (ID: '%s')"
-                                         % (attachment.name, tg_message.message_id,
-                                            tg_chat_title, str(self.config.tg_forward_to_chat_id)))
+                    except error.TelegramError as tg_mail_error:
+                        msg = "❌ Failed to send Telegram message (UID: %s) to '%s': %s" \
+                              % (mail.uid, str(self.config.tg_forward_to_chat_id), tg_mail_error.message)
+                        logging.critical(msg)
+                        try:
+                            # try to send error via telegram, and ignore further errors
+                            await self.bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
+                                                        parse_mode=ParseMode.MARKDOWN_V2,
+                                                        text=helpers.escape_markdown(msg, version=2),
+                                                        disable_web_page_preview=False)
+                        finally:
+                            pass
 
-                except telegram.TelegramError as tg_mail_error:
-                    msg = "❌ Failed to send Telegram message (UID: %s) to '%s': %s" \
-                          % (mail.uid, str(self.config.tg_forward_to_chat_id), tg_mail_error.message)
-                    logging.critical(msg)
-                    try:
-                        # try to send error via telegram, and ignore further errors
-                        bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
-                                         parse_mode=telegram.ParseMode.MARKDOWN_V2,
-                                         text=telegram.utils.helpers.escape_markdown(msg, version=2),
-                                         disable_web_page_preview=False)
-                    finally:
-                        pass
+                    except Exception as send_mail_error:
+                        error_msgs = [self.config.tool.binary_to_string(arg) for arg in send_mail_error.args]
+                        msg = "Failed to send Telegram message (UID: %s) to '%s': %s" \
+                              % (mail.uid, str(self.config.tg_forward_to_chat_id), ', '.join(error_msgs))
+                        logging.critical(msg)
+                        try:
+                            # try to send error via telegram, and ignore further errors
+                            await self.bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
+                                                        parse_mode=ParseMode.MARKDOWN_V2,
+                                                        text=helpers.escape_markdown(msg, version=2),
+                                                        disable_web_page_preview=False)
+                        finally:
+                            pass
 
-                except Exception as send_mail_error:
-                    error_msgs = [self.config.tool.binary_to_string(arg) for arg in send_mail_error.args]
-                    msg = "Failed to send Telegram message (UID: %s) to '%s': %s" \
-                          % (mail.uid, str(self.config.tg_forward_to_chat_id), ', '.join(error_msgs))
-                    logging.critical(msg)
-                    try:
-                        # try to send error via telegram, and ignore further errors
-                        bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
-                                         parse_mode=telegram.ParseMode.MARKDOWN_V2,
-                                         text=telegram.utils.helpers.escape_markdown(msg, version=2),
-                                         disable_web_page_preview=False)
-                    finally:
-                        pass
-
-        except telegram.TelegramError as tg_error:
-            logging.critical("Failed to send Telegram message: %s" % tg_error.message)
+        except error.TelegramError as tg_error:
+            logging.critical(_error_snd_message % tg_error.message)
             return False
 
         except Exception as send_error:
             error_msgs = [self.config.tool.binary_to_string(arg) for arg in send_error.args]
-            logging.critical("Failed to send Telegram message: %s" % ', '.join(error_msgs))
+            logging.critical(_error_snd_message % ', '.join(error_msgs))
             return False
 
         return True
@@ -593,7 +649,7 @@ class Mail:
             self.mailbox = imaplib2.IMAP4_SSL(host=config.imap_server,
                                               port=config.imap_port,
                                               timeout=config.imap_timeout)
-            rv, data = self.mailbox.login(config.imap_user, config.imap_password)
+            rv, _ = self.mailbox.login(config.imap_user, config.imap_password)
             if rv != 'OK':
                 msg = "Cannot login to mailbox: %s" % str(rv)
                 raise self.MailError(msg)
@@ -628,7 +684,7 @@ class Mail:
             logging.info("Mailboxes:")
             logging.info(mailboxes)
 
-        rv, data = self.mailbox.select(config.imap_folder)
+        rv, _ = self.mailbox.select(config.imap_folder)
         if rv == 'OK':
             logging.info("Processing mailbox...")
         else:
@@ -639,7 +695,7 @@ class Mail:
     def is_connected(self):
         if self.mailbox is not None:
             try:
-                rv, data = self.mailbox.noop()
+                rv, _ = self.mailbox.noop()
                 if rv == 'OK':
                     logging.debug("Connection is working...")
                     return True
@@ -647,7 +703,6 @@ class Mail:
                 msg = "Error during connection check [noop]: %s" \
                       % (', '.join(map(str, connection_check_error.args)))
                 logging.error(msg)
-                pass
         return False
 
     def disconnect(self):
@@ -657,7 +712,6 @@ class Mail:
                 self.mailbox.logout()
             except Exception as ex:
                 logging.debug("Cannot close mailbox: %s" % ', '.join(ex.args))
-                pass
             finally:
                 self.mailbox = None
 
@@ -777,13 +831,13 @@ class Mail:
                         content = bot.cleanup_html(body.html, body.images)
 
                     elif body.text:
-                        content = telegram.utils.helpers.escape_markdown(text=content,
-                                                                         version=self.config.tg_markdown_version)
+                        content = helpers.escape_markdown(text=content,
+                                                          version=self.config.tg_markdown_version)
 
                 else:
                     if body.text:
-                        content = telegram.utils.helpers.escape_markdown(text=content,
-                                                                         version=self.config.tg_markdown_version)
+                        content = helpers.escape_markdown(text=content,
+                                                          version=self.config.tg_markdown_version)
 
                     elif body.html:
                         message_type = MailDataType.HTML
@@ -796,7 +850,7 @@ class Mail:
                     if message_type == MailDataType.HTML:
                         # add space after links (provide space for touch on link lists)
                         # '&lt;' keep mail marker together (ex.: &lt;<a href="mailto:t@ex.com">t@ex.xom</a>&gt;)
-                        content = re.sub(r'(?P<a></a>(\s*&gt;)?)\s*', '\g<a>\n\n', content, flags=re.MULTILINE)
+                        content = re.sub(r'(?P<a></a>(\s*&gt;)?)\s*', r'\g<a>\n\n', content, flags=re.MULTILINE)
 
                     # remove spaces and line breaks on start and end (enhanced strip)
                     content = re.sub(r'^\s*', '', content)
@@ -833,7 +887,7 @@ class Mail:
                     if message_type == MailDataType.HTML:
                         file_name = attachment.name
                     else:
-                        file_name = telegram.utils.helpers.escape_markdown(
+                        file_name = helpers.escape_markdown(
                             text=attachment.name, version=self.config.tg_markdown_version)
                     attachments_summary += "\n " + str(attachment.idx) + ": " + file_name
 
@@ -852,12 +906,12 @@ class Mail:
                 mail_from = html.escape(mail_from, quote=True)
                 email_text = "<b>From:</b> " + mail_from + "\n<b>Subject:</b> "
             else:
-                subject = telegram.utils.helpers.escape_markdown(text=subject,
-                                                                 version=self.config.tg_markdown_version)
-                mail_from = telegram.utils.helpers.escape_markdown(text=mail_from,
-                                                                   version=self.config.tg_markdown_version)
-                summary_line = telegram.utils.helpers.escape_markdown(text=summary_line,
-                                                                      version=self.config.tg_markdown_version)
+                subject = helpers.escape_markdown(text=subject,
+                                                  version=self.config.tg_markdown_version)
+                mail_from = helpers.escape_markdown(text=mail_from,
+                                                    version=self.config.tg_markdown_version)
+                summary_line = helpers.escape_markdown(text=summary_line,
+                                                       version=self.config.tg_markdown_version)
                 email_text = "*From:* " + mail_from + "\n*Subject:* "
             email_text += subject + summary_line + content + " " + attachments_summary
 
@@ -1001,7 +1055,7 @@ class SystemdHandler(logging.Handler):
                 print("ERROR: SystemdHandler.emit failed with: " + emit_error.__str__())
 
 
-def main():
+async def main() -> None:
     """
         Run the main program
     """
@@ -1040,12 +1094,12 @@ def main():
                         if last_try + 60 < time.time():
                             mailbox = Mail(config)
                             if not mailbox.is_connected():
-                                time.sleep(20)
+                                await asyncio.sleep(20)
                                 continue
                             else:
                                 last_try = time.time()  # new timeout on success
                         else:
-                            time.sleep(20)
+                            await asyncio.sleep(20)
                             continue
 
                 mails = mailbox.search_mails()
@@ -1056,12 +1110,12 @@ def main():
 
                 # send mail data via TG bot
                 if mails is not None and len(mails) > 0:
-                    tg_bot.send_message(mails)
+                    await tg_bot.send_message(mails)
 
                 if config.imap_push_mode:
                     logging.info("IMAP IDLE mode")
                 else:
-                    time.sleep(float(config.imap_refresh))
+                    await asyncio.sleep(float(config.imap_refresh))
 
             except Mail.MailError as mail_ex:
                 if len(mail_ex.args) > 0:
@@ -1073,7 +1127,6 @@ def main():
                     mailbox.disconnect()
 
                 # ignore errors already handled by Mail- Class
-                pass
 
             except Exception as loop_error:
                 if len(loop_error.args) > 0:
@@ -1102,4 +1155,6 @@ def main():
         logging.info('Mail to Telegram Forwarder stopped!')
 
 
-main()
+if __name__ == "__main__":
+    with contextlib.suppress(KeyboardInterrupt):  # Ignore exception when Ctrl-C is pressed
+        asyncio.run(main())
