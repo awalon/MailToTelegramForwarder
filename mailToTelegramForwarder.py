@@ -76,7 +76,7 @@ except ImportError as import_error:
 """
 
 __appname__ = "Mail to Telegram Forwarder"
-__version__ = "0.2.2"
+__version__ = "0.3"
 __author__ = "Awalon (https://github.com/awalon)"
 
 with warnings.catch_warnings(record=True) as w:
