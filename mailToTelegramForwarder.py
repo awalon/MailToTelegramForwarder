@@ -19,13 +19,14 @@
 ---
 
         Debian:
-            apt install python3-python-telegram-bot python3-imaplib2 python3-bs4
+            sudo apt install python3-python-telegram-bot python3-imaplib2 python3-bs4
         Arch:
             yay -Su python-telegram-bot python-imaplib2 python-beautifulsoup4
 
 """
 
 try:
+    # noinspection except,PyUnusedImports
     from bs4 import BeautifulSoup
     # noinspection except,PyUnusedImports
     import asyncio
@@ -43,23 +44,23 @@ try:
     import re
     # noinspection except,PyUnusedImports
     import unicodedata
-    # noinspection except
+    # noinspection except,PyUnusedImports
     import argparse
-    # noinspection except
+    # noinspection except,PyUnusedImports
     import html
-    # noinspection except
+    # noinspection except,PyUnusedImports
     import socket
-    # noinspection except
+    # noinspection except,PyUnusedImports
     import time
-    # noinspection except
+    # noinspection except,PyUnusedImports
     import configparser
-    # noinspection except
+    # noinspection except,PyUnusedImports
     import imaplib2
-    # noinspection except
+    # noinspection except,PyUnusedImports
     import email
-    # noinspection except
+    # noinspection except,PyUnusedImports
     from email.header import Header, decode_header, make_header
-    # noinspection except
+    # noinspection except,PyUnusedImports
     from enum import Enum
 except ImportError as import_error:
     logging.critical(import_error.__class__.__name__ + ": " + import_error.args[0])
@@ -186,8 +187,8 @@ class Config:
 
     def __init__(self, tool, cmd_args):
         """
-            Parse config file to obtain login credentials, address of remote mail server,
-            telegram config and configuration which controls behaviour of this script .
+            Parse config file for login credentials, address of remote mail server,
+            telegram config and configuration of this application.
         """
         try:
             self.tool = tool
@@ -346,7 +347,7 @@ class MailData:
 
 class TelegramBot:
     config: Config
-    _error_snd_message: "Failed to send Telegram message: %s"
+    error_send_message: str = "Failed to send Telegram message: %s"
 
     def __init__(self, config: Config):
         self.config = config
@@ -359,7 +360,7 @@ class TelegramBot:
             )
             self.bot = Bot(token=self.config.tg_bot_token, request=request)
         except error.TelegramError as tg_error:
-            logging.critical(_error_send_message % tg_error.message)
+            logging.critical(self.error_send_message % tg_error.message)
 
     def cleanup_html(self, message: str, images: typing.Optional[dict[str, MailAttachment]] = None) -> str:
         """
@@ -617,12 +618,12 @@ class TelegramBot:
                             pass
 
         except error.TelegramError as tg_error:
-            logging.critical(_error_snd_message % tg_error.message)
+            logging.critical(self.error_send_message % tg_error.message)
             return False
 
         except Exception as send_error:
             error_msgs = [self.config.tool.binary_to_string(arg) for arg in send_error.args]
-            logging.critical(_error_snd_message % ', '.join(error_msgs))
+            logging.critical(self.error_send_message % ', '.join(error_msgs))
             return False
 
         return True

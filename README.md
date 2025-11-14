@@ -322,7 +322,7 @@ sudo systemctl status mail-to-telegram-forwarder@mailToTelegramForwarder
   on - *Initial work* - **Luca Weiss** [@z3ntu](https://github.com/z3ntu/IMAPBot)
   [*Abandoned*]
 - **Awalon** - *Merged and enhanced Version* - 
-  [@awalon](https://github.com/awalon/MailToTelegramForwarder)
+  [@Awalon](https://github.com/awalon/MailToTelegramForwarder)
 
 ## License
 
