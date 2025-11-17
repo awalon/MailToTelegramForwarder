@@ -92,7 +92,6 @@ with warnings.catch_warnings(record=True) as w:
     from telegram.request import HTTPXRequest
     from telegram.constants import ParseMode
 
-
     # Ignore not supported warnings
     if len(w) > 0:
         if 'This is allowed but not supported by python-telegram-bot maintainers' in str(w[-1].message):
@@ -184,6 +183,11 @@ class Config:
     tg_forward_mail_content = True
     tg_forward_attachment = True
     tg_forward_embedded_images = True
+    tg_connection_read_timeout = 60
+    tg_connection_write_timeout = 60
+    tg_connection_connect_timeout = 60
+    tg_connection_pool_timeout = 60
+    tg_connection_pool_size = 20
 
     def __init__(self, tool, cmd_args):
         """
@@ -227,6 +231,18 @@ class Config:
                                                          self.tg_forward_attachment, bool)
             self.tg_forward_embedded_images = self.get_config('Telegram', 'forward_embedded_images',
                                                               self.tg_forward_embedded_images, bool)
+
+            self.tg_connection_read_timeout = self.get_config('Telegram', 'connection_read_timeout',
+                                                              self.tg_connection_read_timeout, int)
+            self.tg_connection_write_timeout = self.get_config('Telegram', 'connection_write_timeout',
+                                                              self.tg_connection_write_timeout, int)
+            self.tg_connection_connect_timeout = self.get_config('Telegram', 'connection_connect_timeout',
+                                                              self.tg_connection_connect_timeout, int)
+            self.tg_connection_pool_timeout = self.get_config('Telegram', 'connection_pool_timeout',
+                                                              self.tg_connection_pool_timeout, int)
+            self.tg_connection_pool_size = self.get_config('Telegram', 'connection_pool_size',
+                                                              self.tg_connection_pool_size, int)
+
             if cmd_args.read_old_mails:
                 self.imap_read_old_mails = True
 
@@ -347,18 +363,22 @@ class MailData:
 
 class TelegramBot:
     config: Config
+    request: HTTPXRequest
+    bot: Bot
     error_send_message: str = "Failed to send Telegram message: %s"
 
     def __init__(self, config: Config):
         self.config = config
         try:
             # Initialize the Bot with HTTPXRequest with increased connection pool size and proper timeouts
-            request = HTTPXRequest(
-                connection_pool_size=20,
-                connect_timeout=60,  # Connection timeout in seconds
-                read_timeout=60  # Read timeout in seconds
+            self.request = HTTPXRequest(
+                connection_pool_size=config.tg_connection_pool_size,
+                pool_timeout=config.tg_connection_pool_timeout,
+                connect_timeout=config.tg_connection_connect_timeout,
+                read_timeout=config.tg_connection_read_timeout,
+                write_timeout=config.tg_connection_read_timeout
             )
-            self.bot = Bot(token=self.config.tg_bot_token, request=request)
+            self.bot = Bot(token=self.config.tg_bot_token, request=self.request)
         except error.TelegramError as tg_error:
             logging.critical(self.error_send_message % tg_error.message)
 
@@ -496,12 +516,8 @@ class TelegramBot:
         """
         try:
             # Initialize the Bot with HTTPXRequest with increased connection pool size and proper timeouts
-            request = HTTPXRequest(
-                connection_pool_size=20,
-                connect_timeout=120,  # Connection timeout in seconds
-                read_timeout=120  # Read timeout in seconds
-            )
-            async with Bot(token=self.config.tg_bot_token, request=request) as bot:
+            async with Bot(token=self.config.tg_bot_token, request=self.request) as bot:
+                logging.debug("Bot initialized, connecting to Chat '{0}'...".format(self.config.tg_forward_to_chat_id))
 
                 tg_chat: ChatFullInfo = await bot.get_chat(self.config.tg_forward_to_chat_id)
 
