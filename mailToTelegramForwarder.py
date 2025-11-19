@@ -62,6 +62,10 @@ try:
     from email.header import Header, decode_header, make_header
     # noinspection except,PyUnusedImports
     from enum import Enum
+    # noinspection except,PyUnusedImports
+    #from typing import List, Optional, TypedDict
+    # noinspection except,PyUnusedImports
+    from re import Match
 except ImportError as import_error:
     logging.critical(import_error.__class__.__name__ + ": " + import_error.args[0])
     sys.exit(2)
@@ -99,7 +103,7 @@ with warnings.catch_warnings(record=True) as w:
 
 
 class Tool:
-    mask_error_data: [str] = []
+    mask_error_data: list[str] = []
 
     def decode_mail_data(self, value) -> str:
         result = ''
@@ -145,7 +149,7 @@ class Tool:
     def build_error_message(self, message) -> str:
         error_message: str
         if type(message) is list:
-            lines: [str] = []
+            lines: list[str] = []
             for item in message:
                 lines.append(self._convert_error_message(item))
             error_message = "; ".join(lines)
@@ -187,7 +191,7 @@ class Config:
     tg_connection_write_timeout = 60
     tg_connection_connect_timeout = 60
     tg_connection_pool_timeout = 60
-    tg_connection_pool_size = 20
+    tg_connection_pool_size = 256
 
     def __init__(self, tool, cmd_args):
         """
@@ -301,10 +305,11 @@ class MailAttachment:
     name: str = ''
     alt: str = ''
     type: MailAttachmentType = MailAttachmentType.BINARY
-    file: typing.Optional[str] = None
-    tg_id: typing.Optional[str] = None
+    file: str | None = None
+    tg_id: str | None = None
 
     def __init__(self, attachment_type: MailAttachmentType = MailAttachmentType.BINARY):
+        super().__init__()
         self.type = attachment_type
 
     def set_name(self, file_name: str):
@@ -327,38 +332,35 @@ class MailAttachment:
             return self.file
 
 
-class MailBody:
-    text: str = ''
-    html: str = ''
-    images: typing.Optional[dict[str, MailAttachment]] = None
-    attachments: typing.Optional[list[MailAttachment]] = None
-
-
 class MailDataType(Enum):
     TEXT = 1
     HTML = 2
 
 
-class MailImages(typing.TypedDict):
+class MailImage(dict):
     key: str
     image: MailAttachment
 
 
-class MailAttachments(typing.List):
-    attachment: MailAttachment
+class MailBody:
+    text: str = ''
+    html: str = ''
+    images: list[MailImage] = []
+    attachments: list[MailAttachment] = []
 
 
 class MailData:
     uid: str = ''
-    raw: str = ''
+    #raw: str = '' #
+    raw: None # type :email.message.Message[str,str] | None
     type: MailDataType = MailDataType.TEXT
     summary: str = ''
     mail_from: str = ''
     mail_subject: str = ''
     mail_body: str = ''
-    mail_images: typing.Optional[MailImages] = None
+    mail_images: list[MailImage] = []
     attachment_summary: str = ''
-    attachments: typing.Optional[MailAttachments] = None
+    attachments: list[MailAttachment] = []
 
 
 class TelegramBot:
@@ -382,7 +384,7 @@ class TelegramBot:
         except error.TelegramError as tg_error:
             logging.critical(self.error_send_message % tg_error.message)
 
-    def cleanup_html(self, message: str, images: typing.Optional[dict[str, MailAttachment]] = None) -> str:
+    def cleanup_html(self, message: str, images: list[MailImage] | None = None) -> str:
         """
         Parse HTML message and remove HTML elements not supported by Telegram
         """
@@ -451,7 +453,10 @@ class TelegramBot:
                         # add image reference
                         tg_body = tg_body.replace(img, '${file:%s}' % cid)
                         # extract alt/title attributes of img elements
-                        images[cid].alt = alt
+                        for image in images:
+                            if image.key == cid:
+                                images.alt = alt
+                                break
                     else:
                         # no file found, use alt text
                         tg_body = tg_body.replace(img, alt)
@@ -510,7 +515,7 @@ class TelegramBot:
 
         return tg_msg
 
-    async def send_message(self, mails: [MailData]):
+    async def send_message(self, mails: list[MailData]):
         """
         Send mail data over Telegram API to chat/user.
         """
@@ -543,8 +548,9 @@ class TelegramBot:
 
                             # upload images
                             image_no = 1
-                            for image_id in mail.mail_images:
-                                image = mail.mail_images[image_id]
+                            for mail_image in mail.mail_images:
+                                # image = mail.mail_images.[image_id]
+                                image = mail_image['image']
                                 title = '%s' % image.get_title()
 
                                 if self.config.tg_forward_embedded_images:
@@ -555,7 +561,7 @@ class TelegramBot:
                                         caption=title,
                                         photo=image.file,
                                     )
-                                    photo_size: [PhotoSize] = doc_message.photo
+                                    photo_size: list[PhotoSize] = doc_message.photo
                                     image.tg_id = photo_size[0].file_id
 
                                 message = message.replace(
@@ -617,7 +623,7 @@ class TelegramBot:
                                                         text=helpers.escape_markdown(msg, version=2),
                                                         disable_web_page_preview=False)
                         finally:
-                            pass
+                            logging.critical("Failed to send error message {0}".format(tg_mail_error.message))
 
                     except Exception as send_mail_error:
                         error_msgs = [self.config.tool.binary_to_string(arg) for arg in send_mail_error.args]
@@ -631,7 +637,7 @@ class TelegramBot:
                                                         text=helpers.escape_markdown(msg, version=2),
                                                         disable_web_page_preview=False)
                         finally:
-                            pass
+                            logging.critical("Failed to send error message {0}".format("".join(error_msgs)))
 
         except error.TelegramError as tg_error:
             logging.critical(self.error_send_message % tg_error.message)
@@ -739,8 +745,8 @@ class Mail:
         """
         html_part = None
         text_part = None
-        attachments: [MailAttachment] = []
-        images: dict[str, MailAttachment] = {}
+        attachments: list[MailAttachment] = []
+        images: list[MailImage] = []
         index: int = 1
 
         for part in msg.walk():
@@ -793,7 +799,7 @@ class Mail:
                         image.set_name(str(part.get_filename()))
                         image.set_id(part.get('Content-ID', image.name))
                         image.file = part.get_payload(decode=True)
-                        images[image.id] = image
+                        images.append(MailImage(key=image.id, image=image))
                         index += 1
 
         body = MailBody()
@@ -813,12 +819,12 @@ class Mail:
             return ''
         return self.config.tool.binary_to_string(data[0])
 
-    def parse_mail(self, uid, mail) -> (MailData, None):
+    def parse_mail(self, uid, mail) -> (MailData | None):
         """
         parse data from mail like subject, body and attachments and return structured mail data
         """
         try:
-            msg = email.message_from_bytes(mail)
+            msg: email.message.Message[str, str] = email.message_from_bytes(mail)
 
             # decode body data (text, html, multipart/attachments)
             body = self.decode_body(msg)
@@ -832,13 +838,16 @@ class Mail:
 
                     # insert inline image
                     if self.config.tg_forward_embedded_images:
+                        cid: Match[str]
                         for cid in re.finditer(r'\[cid:([^]]*)]', content,
                                                flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE)):
-                            if cid in body.images:
-                                content = content.replace(
-                                    '[cid:' + cid.string + ']',
-                                    '${file:' + body.images[cid.string].tg_id + '}'
-                                )
+                            for mail_image in body.images:
+                                if mail_image['key'] == cid:
+                                    content = content.replace(
+                                        '[cid:' + cid.string + ']',
+                                        '${file:' + mail_image['image'].tg_id + '}'
+                                    )
+                                    break
 
                 bot = TelegramBot(self.config)
                 if self.config.tg_prefer_html:
@@ -953,7 +962,7 @@ class Mail:
                 logging.critical("Cannot parse mail: %s" % parse_error.__str__())
             return None
 
-    def search_mails(self) -> [MailData]:
+    def search_mails(self) -> list[MailData]:
         """
         Search mail on remote IMAP server and return list of parsed mails.
         """
@@ -970,13 +979,13 @@ class Mail:
 
         if re.match(r'.*\bUID\b\s*:.*', search_string) and self.last_uid == '':
             # empty mailbox
-            return
+            return []
 
         try:
             rv, data = self.mailbox.uid('search', '', search_string)
             if rv != 'OK':
                 logging.info("No messages found!")
-                return
+                return []
 
         except imaplib2.IMAP4_SSL.error as search_error:
             error_msgs = [self.config.tool.binary_to_string(arg) for arg in search_error.args]
@@ -991,7 +1000,7 @@ class Mail:
             msg = ', '.join(map(str, search_ex.args))
             logging.critical("Cannot search mail: %s" % msg)
             self.disconnect()
-            return self.MailError(msg)
+            raise self.MailError(msg)
 
         mails = []
         if self.config.imap_read_old_mails and not self.config.imap_read_old_mails_processed:
@@ -1014,7 +1023,7 @@ class Mail:
                 rv, data = self.mailbox.uid('fetch', cur_uid, '(RFC822)')
                 if rv != 'OK':
                     logging.error("ERROR getting message: %s" % current_uid)
-                    return
+                    return []
 
                 msg_raw = data[0][1]
                 mail = self.parse_mail(current_uid, msg_raw)
