@@ -1,3 +1,14 @@
+# This project has moved
+
+> [!WARNING]  
+> This repository is now maintained at
+> [https://codeberg.org/Awalon/MailToTelegramForwarder](https://codeberg.org/Awalon/MailToTelegramForwarder).
+
+> [!CAUTION]  
+> This GitHub mirror may be out of date. Please file issues and
+> contributions on Codeberg.
+
+
 # [![Logo](logo/Mail2TelegramForwarder-Bot-small.png)](logo/CREDIT.md) MailToTelegramForwarder - Service
 [![Project: MailToTelegramForwarder](https://img.shields.io/badge/Project-MailToTelegramForwarder-red.svg?style=flat-square)](https://github.com/awalon/MailToTelegramForwarder/)
 [![GitHub issues](https://img.shields.io/github/issues/awalon/MailToTelegramForwarder?style=flat-square)](https://github.com/awalon/MailToTelegramForwarder/issues) 
